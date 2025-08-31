@@ -557,6 +557,7 @@
       wireEvents();
       setStatus("Ready. Sign in to begin.");
       updateGenerateButton(); // Initialize AI button state
+      updateCostEstimate(); // Initialize cost estimate
     }).catch(err => { console.error(err); setStatus("Failed to initialize Google Identity Services."); });
   });
 
@@ -669,7 +670,7 @@
       btn.addEventListener('click', () => switchTab(btn.dataset.tab));
     });
 
-    // Fixed generate button
+    // Fixed generate button and cancel button
     fixedGenerateBtn.addEventListener('click', () => generateAIContent());
     cancelGenerateBtn.addEventListener('click', () => cancelGeneration());
 
@@ -696,19 +697,6 @@
     window.addEventListener("beforeunload", () => { flushSave({ silent:true }); });
   }
 
-  // Drawer controller
-  function openMeta(open) {
-    metaPanel.setAttribute('data-open', open ? '1' : '0');
-    metaScrim.setAttribute('data-open', open ? '1' : '0');
-    metaTab.setAttribute('aria-expanded', String(open));
-    if (open) {
-      // Focus the first editable input for speedy tweaking
-      setTimeout(() => { aiPreInput.focus(); aiPreInput.setSelectionRange(aiPreInput.value.length, aiPreInput.value.length); }, 80);
-    } else {
-      metaTab.focus();
-    }
-  }
-
   // Tab switching
   function switchTab(tabName) {
     // Hide all tab contents
@@ -720,6 +708,19 @@
     document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
     
     activeTab = tabName;
+  }
+
+  // Drawer controller
+  function openMeta(open) {
+    metaPanel.setAttribute('data-open', open ? '1' : '0');
+    metaScrim.setAttribute('data-open', open ? '1' : '0');
+    metaTab.setAttribute('aria-expanded', String(open));
+    if (open) {
+      // Focus the first editable input for speedy tweaking
+      setTimeout(() => { aiPreInput.focus(); aiPreInput.setSelectionRange(aiPreInput.value.length, aiPreInput.value.length); }, 80);
+    } else {
+      metaTab.focus();
+    }
   }
 
   // =========================
@@ -844,21 +845,25 @@
       return;
     }
     
-    // Basic cost estimation (simplified)
+    // More accurate cost estimation with recent pricing (per 1M tokens)
     const tokens = parseInt(maxTokensInput.value) || 1000;
     const modelCosts = {
-      'anthropic/claude-3.5-sonnet': 0.000015,
-      'anthropic/claude-3-haiku': 0.00000025,
-      'openai/gpt-4o': 0.00001,
-      'openai/gpt-4o-mini': 0.00000015,
-      'meta-llama/llama-3.1-70b-instruct': 0.0000009,
-      'meta-llama/llama-3.1-8b-instruct': 0.00000006
+      'anthropic/claude-3.5-sonnet': 15.00, // $15 per 1M output tokens  
+      'anthropic/claude-3-haiku': 1.25,     // $1.25 per 1M output tokens
+      'openai/gpt-4o': 10.00,               // $10 per 1M output tokens
+      'openai/gpt-4o-mini': 0.60,           // $0.60 per 1M output tokens
+      'meta-llama/llama-3.1-70b-instruct': 0.90,  // $0.90 per 1M output tokens
+      'meta-llama/llama-3.1-8b-instruct': 0.18     // $0.18 per 1M output tokens
     };
     
-    const costPerToken = modelCosts[aiModel.value] || 0.000001;
-    const estimatedCost = tokens * costPerToken;
+    const costPer1MTokens = modelCosts[aiModel.value] || 1.00;
+    const estimatedCost = (tokens / 1000000) * costPer1MTokens;
     
-    costEstimate.textContent = `~$${estimatedCost.toFixed(4)} per generation`;
+    if (estimatedCost < 0.01) {
+      costEstimate.textContent = `~$${(estimatedCost * 100).toFixed(2)}¢ per generation`;
+    } else {
+      costEstimate.textContent = `~$${estimatedCost.toFixed(3)} per generation`;
+    }
   }
 
   async function refreshAvailableModels() {
@@ -875,6 +880,8 @@
       const response = await fetch("https://openrouter.ai/api/v1/models", {
         headers: {
           "Authorization": `Bearer ${openrouterKey.value.trim()}`,
+          "HTTP-Referer": window.location.origin,
+          "X-Title": "Ghostwriter"
         }
       });
       
