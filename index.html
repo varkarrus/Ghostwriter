@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>StoryPad POC — Google Docs Sync</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Google Identity Services (Auth) -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <!-- Google API client (for Docs/Drive REST) -->
+  <script src="https://apis.google.com/js/api.js" async defer></script>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    body { margin: 0; display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
+    header, footer { padding: 12px 16px; background: #f6f6f6; border-bottom: 1px solid #e8e8e8; }
+    footer { border-top: 1px solid #e8e8e8; border-bottom: none; font-size: 12px; color: #555; }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .toolbar input[type="text"] { flex: 1; min-width: 200px; padding: 8px; }
+    .toolbar button { padding: 8px 10px; }
+    #editor { width: 100%; height: 100%; padding: 16px; box-sizing: border-box; border: none; outline: none; font: 14px/1.5 monospace; }
+    #status { color: #333; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #eee; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="toolbar">
+      <button id="auth-btn">Sign in</button>
+      <button id="signout-btn" disabled>Sign out</button>
+      <span class="pill" id="auth-state">Signed out</span>
+      <button id="create-doc-btn" disabled>Create new Doc</button>
+      <input id="doc-id-input" type="text" placeholder="Existing Doc ID (or use ?doc=...)" />
+      <button id="load-doc-btn" disabled>Load Doc</button>
+      <button id="save-btn" disabled>Save to Doc</button>
+    </div>
+  </header>
+
+  <textarea id="editor" placeholder="Write your story here…"></textarea>
+
+  <footer>
+    <span id="status">Ready.</span>
+  </footer>
+
+<script>
+  // === Configuration ===
+  const CLIENT_ID = "389780383024-03s13biqo3n1hvdv2mn8jb2fcvc17ks3.apps.googleusercontent.com";
+  // Only what we need:
+  const SCOPES = [
+    "https://www.googleapis.com/auth/documents",
+    "https://www.googleapis.com/auth/drive.file"
+  ].join(" ");
+
+  // === DOM elements ===
+  const authBtn = document.getElementById("auth-btn");
+  const signoutBtn = document.getElementById("signout-btn");
+  const createDocBtn = document.getElementById("create-doc-btn");
+  const loadDocBtn = document.getElementById("load-doc-btn");
+  const saveBtn = document.getElementById("save-btn");
+  const authState = document.getElementById("auth-state");
+  const editor = document.getElementById("editor");
+  const docIdInput = document.getElementById("doc-id-input");
+  const statusEl = document.getElementById("status");
+
+  let tokenClient = null;
+  let accessToken = null;
+  let currentDocId = null;
+
+  // Utility: status updates
+  function setStatus(msg) {
+    statusEl.textContent = msg;
+  }
+
+  // Utility: parse ?doc=... from URL to auto-load
+  function getDocIdFromQuery() {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("doc");
+  }
+
+  // Load Google API Client and set up
+  window.addEventListener("load", () => {
+    // Wait for both GIS and gapi to be ready
+    const waitFor = (cond) => new Promise(res => {
+      const tick = () => cond() ? res() : setTimeout(tick, 50);
+      tick();
+    });
+
+    Promise.all([
+      waitFor(() => window.google && google.accounts && google.accounts.oauth2),
+      waitFor(() => window.gapi && gapi.load)
+    ]).then(async () => {
+      initAuth();
+      await initGapiClient();
+      wireEvents();
+      setStatus("Ready. Sign in to begin.");
+
+      const preset = getDocIdFromQuery();
+      if (preset) docIdInput.value = preset;
+    }).catch(err => {
+      console.error(err);
+      setStatus("Error initializing Google APIs. Check console.");
+    });
+  });
+
+  function initAuth() {
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: SCOPES,
+      callback: (resp) => {
+        if (resp.error) {
+          console.error(resp);
+          setStatus("Auth error. See console.");
+          return;
+        }
+        accessToken = resp.access_token;
+        gapi.client.setToken({ access_token: accessToken });
+        authState.textContent = "Signed in";
+        createDocBtn.disabled = false;
+        loadDocBtn.disabled = false;
+        saveBtn.disabled = !currentDocId;
+        signoutBtn.disabled = false;
+        setStatus("Signed in.");
+      }
+    });
+  }
+
+  async function initGapiClient() {
+    await new Promise((resolve) => gapi.load("client", resolve));
+    await gapi.client.init({
+      discoveryDocs: [
+        "https://docs.googleapis.com/$discovery/rest?version=v1",
+        "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"
+      ]
+      // No API key required for OAuth-authorized requests
+    });
+  }
+
+  function requireAuth(actionName, fn) {
+    return () => {
+      if (!accessToken) {
+        setStatus(`Requesting permission for ${actionName}…`);
+        tokenClient.requestAccessToken({ prompt: "" }); // silent if possible
+        return;
+      }
+      fn();
+    };
+  }
+
+  function wireEvents() {
+    authBtn.addEventListener("click", () => {
+      setStatus("Opening Google sign-in…");
+      tokenClient.requestAccessToken({ prompt: "consent" });
+    });
+
+    signoutBtn.addEventListener("click", () => {
+      if (accessToken) {
+        // Revoke token for good hygiene
+        google.accounts.oauth2.revoke(accessToken, () => {
+          accessToken = null;
+          gapi.client.setToken("");
+          authState.textContent = "Signed out";
+          createDocBtn.disabled = true;
+          loadDocBtn.disabled = true;
+          saveBtn.disabled = true;
+          setStatus("Signed out.");
+        });
+      }
+    });
+
+    createDocBtn.addEventListener("click", requireAuth("creating a Doc", createNewDoc));
+    loadDocBtn.addEventListener("click", requireAuth("loading a Doc", () => {
+      const id = docIdInput.value.trim();
+      if (!id) { setStatus("Enter a Doc ID first."); return; }
+      loadDoc(id);
+    }));
+    saveBtn.addEventListener("click", requireAuth("saving to Doc", saveDoc));
+  }
+
+  async function createNewDoc() {
+    try {
+      setStatus("Creating Google Doc…");
+      const title = `StoryPad ${new Date().toISOString().replace(/[:.]/g, "-")}`;
+      const res = await gapi.client.docs.documents.create({
+        title
+      });
+      currentDocId = res.result.documentId;
+      saveBtn.disabled = false;
+      setStatus(`Created: ${title} (ID: ${currentDocId}). Saving initial content…`);
+      // Optional initial content (empty/placeholder)
+      await overwriteDoc(currentDocId, editor.value || "");
+      setStatus(`Doc created and synced. You can bookmark this: ?doc=${currentDocId}`);
+      // Put ID in input for convenience
+      docIdInput.value = currentDocId;
+      // Update URL (no reload)
+      const u = new URL(window.location.href);
+      u.searchParams.set("doc", currentDocId);
+      window.history.replaceState({}, "", u.toString());
+    } catch (err) {
+      console.error(err);
+      setStatus("Failed to create Doc. See console.");
+    }
+  }
+
+  async function loadDoc(id) {
+    try {
+      setStatus("Loading Doc content…");
+      const res = await gapi.client.docs.documents.get({ documentId: id });
+      currentDocId = id;
+      saveBtn.disabled = false;
+
+      const text = extractTextFromDoc(res.result);
+      editor.value = text;
+      setStatus(`Loaded Doc: ${res.result.title} (ID: ${id}).`);
+      // Update URL (no reload)
+      const u = new URL(window.location.href);
+      u.searchParams.set("doc", id);
+      window.history.replaceState({}, "", u.toString());
+    } catch (err) {
+      console.error(err);
+      setStatus("Failed to load Doc. Check the ID and permissions.");
+    }
+  }
+
+  async function saveDoc() {
+    if (!currentDocId) { setStatus("No Doc to save. Create or load one first."); return; }
+    try {
+      setStatus("Saving…");
+      await overwriteDoc(currentDocId, editor.value);
+      setStatus("Saved.");
+    } catch (err) {
+      console.error(err);
+      setStatus("Save failed. See console.");
+    }
+  }
+
+  // Replace whole doc body with the provided text
+  async function overwriteDoc(documentId, newText) {
+    // Ensure trailing newline so Docs is happy
+    if (!newText.endsWith("\n")) newText += "\n";
+
+    // Get endIndex so we know what to delete
+    const doc = await gapi.client.docs.documents.get({ documentId });
+    const body = doc.result.body;
+    let endIndex = 1; // body start
+    if (body && body.content && body.content.length > 0) {
+      const last = body.content[body.content.length - 1];
+      if (last && typeof last.endIndex === "number") {
+        endIndex = last.endIndex;
+      }
+    }
+
+    const requests = [];
+    if (endIndex > 1) {
+      requests.push({
+        deleteContentRange: {
+          range: { startIndex: 1, endIndex: endIndex - 1 }
+        }
+      });
+    }
+    requests.push({
+      insertText: {
+        location: { index: 1 },
+        text: newText
+      }
+    });
+
+    await gapi.client.docs.documents.batchUpdate({
+      documentId,
+      resource: { requests }
+    });
+  }
+
+  // Extract plain text from a Docs document
+  function extractTextFromDoc(doc) {
+    const out = [];
+    const elts = doc.body?.content || [];
+    for (const el of elts) {
+      if (el.paragraph) {
+        const parts = el.paragraph.elements || [];
+        for (const p of parts) {
+          const tr = p.textRun;
+          if (tr && typeof tr.content === "string") out.push(tr.content);
+        }
+      }
+    }
+    return out.join("");
+  }
+</script>
+</body>
+</html>
