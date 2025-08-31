@@ -203,14 +203,14 @@
     </div>
     <div class="row">
       <label for="openrouter-key">OpenRouter API Key</label>
-      <input type="password" id="openrouter-key" placeholder="sk-or-v1-..." />
+      <input type="password" id="openrouter-key" placeholder="sk-or-v1-..." title="Get your API key from https://openrouter.ai/" />
       <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
         <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="remember-key" /> Remember API key</label>
       </div>
     </div>
     <div class="row">
       <label for="ai-model">AI Model</label>
-      <select id="ai-model">
+      <select id="ai-model" title="Choose the AI model for generation">
         <option value="">Select a model...</option>
         <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
         <option value="anthropic/claude-3-haiku">Claude 3 Haiku</option>
@@ -221,11 +221,11 @@
       </select>
     </div>
     <div class="row">
-      <button id="ai-generate" type="button" disabled>Generate with AI</button>
+      <button id="ai-generate" type="button" disabled title="Generate AI content (Ctrl/⌘+G)">Generate with AI</button>
     </div>
   </div>
   <div id="meta-foot">
-    <div>Changes autosave with content. <span class="pill">Alt+M</span> toggles.</div>
+    <div>Changes autosave with content. <span class="pill">Alt+M</span> toggles. <span class="pill">Ctrl/⌘+G</span> generates AI.</div>
     <div id="meta-hint" class="pill" style="background:#fff;border:1px solid var(--line)">Drive‑synced</div>
   </div>
 </aside>
@@ -435,6 +435,14 @@
       if (primary && /^[1-6]$/.test(e.key)) { e.preventDefault(); toggleHeading(parseInt(e.key,10)); headingSel.value = e.key; return; }
       // Alt+M toggles metadata drawer
       if ((e.altKey || e.metaKey && e.shiftKey) && e.key.toLowerCase() === 'm') { e.preventDefault(); const wantOpen = metaPanel.getAttribute('data-open') !== '1'; openMeta(wantOpen); return; }
+      // Ctrl/Cmd+G generates AI content (if AI panel is open and configured)
+      if (primary && e.key.toLowerCase() === 'g') { 
+        if (metaPanel.getAttribute('data-open') === '1' && !aiGenerate.disabled) {
+          e.preventDefault(); 
+          generateAIContent(); 
+        }
+        return; 
+      }
       if (e.key === 'Escape') { if (metaPanel.getAttribute('data-open') === '1') { e.preventDefault(); openMeta(false); } }
       if (e.key === "Tab") {
         const { start, end } = getSelection(editor);
@@ -633,8 +641,28 @@
       });
 
       if (!response.ok) {
+        let errorMessage = `OpenRouter API error: ${response.status} ${response.statusText}`;
         const errorText = await response.text();
-        throw new Error(`OpenRouter API error: ${response.status} ${response.statusText}${errorText ? ' - ' + errorText : ''}`);
+        
+        // Provide helpful error messages for common issues
+        if (response.status === 401) {
+          errorMessage = "Invalid API key. Please check your OpenRouter API key.";
+        } else if (response.status === 429) {
+          errorMessage = "Rate limit exceeded. Please wait a moment and try again.";
+        } else if (response.status === 402) {
+          errorMessage = "Insufficient credits. Please check your OpenRouter account balance.";
+        } else if (errorText) {
+          try {
+            const errorData = JSON.parse(errorText);
+            if (errorData.error?.message) {
+              errorMessage += `: ${errorData.error.message}`;
+            }
+          } catch {
+            errorMessage += `: ${errorText}`;
+          }
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
