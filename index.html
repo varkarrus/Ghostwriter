@@ -92,6 +92,7 @@
     #meta-body button { padding: 10px 12px; border: 1px solid var(--line); background: #fff; border-radius: 8px; cursor: pointer; font: 13px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; font-weight: 600; }
     #meta-body button:hover:not(:disabled) { background: var(--muted); }
     #meta-body button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #meta-body button.generating { background: #f0f8ff; border-color: #4a90e2; }
     #next-enable-wrap { display:flex; align-items:center; justify-content:flex-end; gap: 8px; }
 
     /* Panel footer */
@@ -578,6 +579,7 @@
       setStatus("Generating AI content...");
       aiGenerate.disabled = true;
       aiGenerate.textContent = "Generating...";
+      aiGenerate.classList.add("generating");
 
       // Get the current editor content
       const currentContent = editor.value || "";
@@ -589,11 +591,21 @@
       }
       prompt += currentContent;
       
-      // Add next instructions if enabled
+      // Add next instructions if enabled - append to most recent complete paragraph
       if (nextEnabled.checked && nextInstInput.value.trim()) {
-        // Find the most recent complete paragraph
+        // Find paragraphs (separated by double newlines or end of text)
         const paragraphs = currentContent.split(/\n\s*\n/).filter(p => p.trim());
         if (paragraphs.length > 0) {
+          // Check if the last paragraph looks complete (ends with punctuation)
+          const lastParagraph = paragraphs[paragraphs.length - 1].trim();
+          if (lastParagraph && /[.!?]$/.test(lastParagraph)) {
+            prompt += `\n\n[${nextInstInput.value.trim()}]`;
+          } else {
+            // If no complete paragraph, just add instructions at the end
+            prompt += `\n\n[${nextInstInput.value.trim()}]`;
+          }
+        } else {
+          // No paragraphs yet, add instructions
           prompt += `\n\n[${nextInstInput.value.trim()}]`;
         }
       }
@@ -621,7 +633,8 @@
       });
 
       if (!response.ok) {
-        throw new Error(`OpenRouter API error: ${response.status} ${response.statusText}`);
+        const errorText = await response.text();
+        throw new Error(`OpenRouter API error: ${response.status} ${response.statusText}${errorText ? ' - ' + errorText : ''}`);
       }
 
       const data = await response.json();
@@ -635,9 +648,17 @@
       const { start, end } = getSelection(editor);
       const before = editor.value.slice(0, start);
       const after = editor.value.slice(end);
-      const newValue = before + generatedText + after;
       
-      applyChange(newValue, start + generatedText.length, start + generatedText.length);
+      // Add appropriate spacing
+      let insertText = generatedText;
+      if (before && !before.endsWith('\n\n')) {
+        insertText = '\n\n' + insertText;
+      }
+      
+      const newValue = before + insertText + after;
+      const newCursorPos = start + insertText.length;
+      
+      applyChange(newValue, newCursorPos, newCursorPos);
       updatePreview();
       
       setStatus("AI content generated successfully.");
@@ -647,6 +668,7 @@
     } finally {
       aiGenerate.disabled = false;
       aiGenerate.textContent = "Generate with AI";
+      aiGenerate.classList.remove("generating");
       updateGenerateButton();
     }
   }
