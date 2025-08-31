@@ -7,30 +7,32 @@
   <!-- Google Identity Services (OAuth in browser) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
-    :root { --bg:#ffffff; --muted:#f6f6f6; --line:#e8e8e8; --ink:#111; --sub:#555; }
+    :root { --bg:#ffffff; --muted:#f6f6f6; --line:#e8e8e8; --ink:#111; --sub:#555; --meta-w: 380px; }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
     body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    .app { display: grid; grid-template-rows: auto auto 1fr auto; height: 100vh; }
+
+    /* App shell: header • main • footer */
+    .app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
     header, footer { background: var(--muted); border-bottom: 1px solid var(--line); }
     footer { border-top: 1px solid var(--line); border-bottom: none; font-size: 12px; color: var(--sub); padding: 10px 14px; display:flex; gap:10px; align-items:center; }
+
+    /* Toolbar */
     .toolbar { padding: 10px 14px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .toolbar .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .toolbar button, .toolbar select { padding: 8px 10px; border: 1px solid var(--line); background: #fff; border-radius: 10px; cursor: pointer; }
     .toolbar button[disabled] { opacity: 0.5; cursor: not-allowed; }
     .toolbar input[type="text"] { flex: 1; min-width: 220px; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
 
-    /* Metadata panel */
-    #meta-panel { padding: 8px 14px; border-bottom: 1px solid var(--line); background:#fff; display: grid; grid-template-columns: 1fr; gap: 8px; }
-    #meta-panel .row { display:grid; grid-template-columns: 160px 1fr auto; align-items: start; gap: 8px; }
-    #meta-panel label { font-size: 12px; color: #333; }
-    #meta-panel textarea { width: 100%; min-height: 60px; max-height: 40vh; padding: 8px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
-    #meta-toggle { padding: 6px 10px; border: 1px solid var(--line); background:#fff; border-radius: 8px; cursor: pointer; }
+    /* File list dropdown */
+    #list-panel { max-height: 40vh; overflow: auto; border-top: 1px solid var(--line); background: #fff; display: none; }
+    #list-panel table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    #list-panel th, #list-panel td { padding: 8px 12px; border-bottom: 1px solid var(--line); }
+    #list-panel tr:hover { background: #fafafa; }
 
     /* Main editor/preview area */
     main.main { display: grid; grid-template-columns: 1fr; height: 100%; min-height: 0; }
     #editor-wrap, #preview { min-height: 0; }
-
     #editor { width: 100%; height: 100%; padding: 16px; border: none; outline: none; resize: none; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
     #preview { display:none; padding: 18px; overflow:auto; background:#fff; border-left: 1px solid var(--line); }
 
@@ -50,16 +52,68 @@
     #preview li { margin: 0.25em 0; }
 
     .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; background: #eee; font-size: 12px; }
-    #list-panel { max-height: 40vh; overflow: auto; border-top: 1px solid var(--line); background: #fff; display: none; }
-    #list-panel table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    #list-panel th, #list-panel td { padding: 8px 12px; border-bottom: 1px solid var(--line); }
-    #list-panel tr:hover { background: #fafafa; }
     a { color: inherit; }
     code.kbd { padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fbfbfb; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
     .dot { width:8px; height:8px; border-radius:999px; background:#bbb; display:inline-block; }
     .dot.saving { background:#d69e2e; }
     .dot.saved { background:#38a169; }
     .dot.idle { background:#bbb; }
+
+    /* ========================= */
+    /* Side Metadata Panel (Drawer) */
+    /* ========================= */
+    #meta-panel {
+      position: fixed;
+      top: 0; right: 0;
+      height: 100vh; width: var(--meta-w);
+      background: #fff;
+      border-left: 1px solid var(--line);
+      box-shadow: -8px 0 24px rgba(0,0,0,0.06);
+      transform: translateX(100%);
+      transition: transform 220ms ease;
+      z-index: 50;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+    }
+    #meta-panel[data-open="1"] { transform: translateX(0); }
+
+    /* Panel header */
+    #meta-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--muted); }
+    #meta-title { font-size: 13px; color: #333; font-weight: 600; }
+    #meta-close, #meta-toggle, #meta-save-now { padding: 6px 10px; border: 1px solid var(--line); background:#fff; border-radius: 8px; cursor: pointer; }
+
+    /* Panel body */
+    #meta-body { padding: 10px 12px; overflow: auto; display: grid; gap: 10px; }
+    #meta-body .row { display:grid; grid-template-columns: 1fr; gap: 6px; }
+    #meta-body label { font-size: 12px; color: #333; }
+    #meta-body textarea { width: 100%; min-height: 100px; max-height: 45vh; padding: 8px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    #next-enable-wrap { display:flex; align-items:center; justify-content:flex-end; gap: 8px; }
+
+    /* Panel footer */
+    #meta-foot { padding: 8px 12px; border-top: 1px solid var(--line); font-size:12px; color: var(--sub); display:flex; justify-content: space-between; align-items:center; gap: 8px; }
+
+    /* Scrim behind drawer */
+    #meta-scrim {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.18);
+      opacity: 0; pointer-events: none; transition: opacity 200ms ease; z-index: 40;
+    }
+    #meta-scrim[data-open="1"] { opacity: 1; pointer-events: auto; }
+
+    /* Side tab button */
+    #meta-tab {
+      position: fixed; right: 0; top: 50%; transform: translate(50%, -50%);
+      writing-mode: vertical-rl; text-orientation: mixed;
+      background: #fff; border: 1px solid var(--line); border-right: none; border-radius: 10px 0 0 10px;
+      padding: 10px 8px; font-size: 12px; cursor: pointer; z-index: 60;
+      box-shadow: -4px 4px 12px rgba(0,0,0,0.06);
+    }
+    #meta-tab[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+
+    /* Responsive niceties */
+    @media (max-width: 480px) {
+      :root { --meta-w: 92vw; }
+      #meta-tab { top: auto; bottom: 18px; transform: translate(50%, 0); writing-mode: horizontal-tb; }
+    }
   </style>
 </head>
 <body data-mode="edit">
@@ -103,22 +157,6 @@
     </div>
   </header>
 
-  <!-- Metadata UI (stored in JSON header, not shown in the editor text) -->
-  <section id="meta-panel">
-    <div class="row">
-      <label for="ai-pre">AI Pre‑prompt</label>
-      <textarea id="ai-pre" placeholder="System-style guidance for the model…"></textarea>
-      <button id="meta-toggle" title="Collapse/Expand metadata">Hide</button>
-    </div>
-    <div class="row">
-      <label for="next-inst">Next Instructions</label>
-      <textarea id="next-inst" placeholder="One-off steering for the next generation…"></textarea>
-      <label style="display:flex;align-items:center;gap:6px;justify-self:end">
-        <input type="checkbox" id="next-enabled" /> Enable
-      </label>
-    </div>
-  </section>
-
   <main class="main">
     <div id="editor-wrap">
       <textarea id="editor" placeholder="Write your story here…"></textarea>
@@ -133,6 +171,36 @@
     <span class="pill" id="sync-note"></span>
   </footer>
 </div>
+
+<!-- Side tab and drawer -->
+<button id="meta-tab" aria-expanded="false" aria-controls="meta-panel" title="Metadata (Alt+M)">Metadata</button>
+<div id="meta-scrim" aria-hidden="true"></div>
+<aside id="meta-panel" role="complementary" aria-label="Story metadata" data-open="0">
+  <div id="meta-head">
+    <div id="meta-title">Story Metadata</div>
+    <div style="display:flex; gap:6px; align-items:center;">
+      <button id="meta-save-now" title="Save now (Ctrl/⌘+S)">Save</button>
+      <button id="meta-close" title="Close (Esc)">Close</button>
+    </div>
+  </div>
+  <div id="meta-body">
+    <div class="row">
+      <label for="ai-pre">AI Pre‑prompt</label>
+      <textarea id="ai-pre" placeholder="System-style guidance for the model…"></textarea>
+    </div>
+    <div class="row">
+      <label for="next-inst">Next Instructions</label>
+      <textarea id="next-inst" placeholder="Steering for the next generation…"></textarea>
+      <div id="next-enable-wrap">
+        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="next-enabled" /> Enable</label>
+      </div>
+    </div>
+  </div>
+  <div id="meta-foot">
+    <div>Changes autosave with content. <span class="pill">Alt+M</span> toggles.</div>
+    <div id="meta-hint" class="pill" style="background:#fff;border:1px solid var(--line)">Drive‑synced</div>
+  </div>
+</aside>
 
 <script>
   // =========================
@@ -183,8 +251,14 @@
   const togglePreviewBtn = document.getElementById("toggle-preview");
   const toggleSplitBtn   = document.getElementById("toggle-split");
   const previewEl    = document.getElementById("preview");
+
+  // Side panel elements
   const metaPanel    = document.getElementById("meta-panel");
-  const metaToggle   = document.getElementById("meta-toggle");
+  const metaScrim    = document.getElementById("meta-scrim");
+  const metaTab      = document.getElementById("meta-tab");
+  const metaClose    = document.getElementById("meta-close");
+  const metaSaveNow  = document.getElementById("meta-save-now");
+
   const aiPreInput   = document.getElementById("ai-pre");
   const nextInstInput= document.getElementById("next-inst");
   const nextEnabled  = document.getElementById("next-enabled");
@@ -220,7 +294,9 @@
     signoutBtn.disabled = !signedIn;
     listBtn.disabled = !signedIn;
     fileIdInput.disabled = !signedIn;
-    [boldBtn, italicBtn, underlineBtn, bulletBtn, headingSel, togglePreviewBtn, toggleSplitBtn, aiPreInput, nextInstInput, nextEnabled, metaToggle].forEach(el => el.disabled = !signedIn);
+    [boldBtn, italicBtn, underlineBtn, bulletBtn, headingSel, togglePreviewBtn, toggleSplitBtn, aiPreInput, nextInstInput, nextEnabled, metaClose, metaSaveNow].forEach(el => el.disabled = !signedIn);
+    metaTab.setAttribute('aria-disabled', String(!signedIn));
+    if (!signedIn) openMeta(false);
   }
   function getQueryFileId() { const p = new URLSearchParams(location.search); return p.get("file"); }
 
@@ -278,16 +354,11 @@
     nextInstInput.addEventListener("input", () => { markDirty(); });
     nextEnabled.addEventListener("change", () => { markDirty(); });
 
-    // Collapse/expand meta panel
-    metaToggle.addEventListener("click", () => {
-      const hidden = metaPanel.getAttribute("data-hidden") === "1";
-      metaPanel.setAttribute("data-hidden", hidden ? "0" : "1");
-      metaPanel.style.display = hidden ? "grid" : "none";
-      metaToggle.textContent = hidden ? "Hide" : "Show";
-    });
-
-    window.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave({ silent:true }); });
-    window.addEventListener("beforeunload", () => { flushSave({ silent:true }); });
+    // Drawer open/close
+    const toggle = () => openMeta(metaPanel.getAttribute('data-open') !== '1');
+    metaTab.addEventListener('click', () => { if (metaTab.getAttribute('aria-disabled') === 'true') return; toggle(); });
+    metaScrim.addEventListener('click', () => openMeta(false));
+    metaClose.addEventListener('click', () => openMeta(false));
 
     // Keyboard shortcuts
     window.addEventListener("keydown", (e) => {
@@ -299,6 +370,9 @@
       if (primary && e.key.toLowerCase() === "u") { e.preventDefault(); toggleUnderline(); return; }
       if (primary && e.shiftKey && e.key === "8") { e.preventDefault(); toggleBulleted(); return; }
       if (primary && /^[1-6]$/.test(e.key)) { e.preventDefault(); toggleHeading(parseInt(e.key,10)); headingSel.value = e.key; return; }
+      // Alt+M toggles metadata drawer
+      if ((e.altKey || e.metaKey && e.shiftKey) && e.key.toLowerCase() === 'm') { e.preventDefault(); const wantOpen = metaPanel.getAttribute('data-open') !== '1'; openMeta(wantOpen); return; }
+      if (e.key === 'Escape') { if (metaPanel.getAttribute('data-open') === '1') { e.preventDefault(); openMeta(false); } }
       if (e.key === "Tab") {
         const { start, end } = getSelection(editor);
         const lines = getSelectedLineRange(editor.value, start, end);
@@ -316,6 +390,25 @@
     // Preview mode toggles
     togglePreviewBtn.addEventListener("click", () => { const mode = document.body.getAttribute("data-mode"); document.body.setAttribute("data-mode", mode === "preview" ? "edit" : "preview"); updatePreview(); });
     toggleSplitBtn.addEventListener("click", () => { const mode = document.body.getAttribute("data-mode"); document.body.setAttribute("data-mode", mode === "split" ? "edit" : "split"); updatePreview(); });
+
+    // Save button in drawer
+    metaSaveNow.addEventListener('click', () => flushSave());
+
+    window.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave({ silent:true }); });
+    window.addEventListener("beforeunload", () => { flushSave({ silent:true }); });
+  }
+
+  // Drawer controller
+  function openMeta(open) {
+    metaPanel.setAttribute('data-open', open ? '1' : '0');
+    metaScrim.setAttribute('data-open', open ? '1' : '0');
+    metaTab.setAttribute('aria-expanded', String(open));
+    if (open) {
+      // Focus the first editable input for speedy tweaking
+      setTimeout(() => { aiPreInput.focus(); aiPreInput.setSelectionRange(aiPreInput.value.length, aiPreInput.value.length); }, 80);
+    } else {
+      metaTab.focus();
+    }
   }
 
   // =========================
@@ -484,6 +577,7 @@
     try { setStatus("Listing files…"); const files = await listStorypadFiles(); listBody.innerHTML = files.map(f => { const when = new Date(f.modifiedTime).toLocaleString(); const openHere = `<button data-open="${f.id}">Open here</button>`; const link = `https://drive.google.com/file/d/${f.id}/view`; return `<tr><td>${escapeHtml(f.name)}</td><td>${when}</td><td>${openHere} <a href="${link}" target="_blank" rel="noreferrer">Drive</a></td></tr>`; }).join(""); listBody.querySelectorAll("button[data-open]").forEach(btn => { btn.addEventListener("click", () => loadFile(btn.getAttribute("data-open"))); }); setStatus("Ready."); } catch (e) { console.error(e); setStatus("List failed. See console."); }
   }
 
+  // NOTE: This overrides the earlier one (intentionally more strict for list rendering)
   function escapeHtml(str){ return String(str).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'", '&#039;'); }
 </script>
 </body>
