@@ -518,7 +518,15 @@
   let activeTab = 'story';
   
   // Available models from OpenRouter
-  let availableModels = [];
+  let availableModels = [
+    // Default models to show even without API key
+    { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', pricing: 0.000015, displayText: 'anthropic/claude-3.5-sonnet - $0.000015/1K tokens' },
+    { id: 'anthropic/claude-3-haiku', name: 'Claude 3 Haiku', pricing: 0.00000025, displayText: 'anthropic/claude-3-haiku - $0.000000/1K tokens' },
+    { id: 'openai/gpt-4o', name: 'GPT-4o', pricing: 0.00001, displayText: 'openai/gpt-4o - $0.000010/1K tokens' },
+    { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini', pricing: 0.00000015, displayText: 'openai/gpt-4o-mini - $0.000000/1K tokens' },
+    { id: 'meta-llama/llama-3.1-70b-instruct', name: 'Llama 3.1 70B', pricing: 0.0000009, displayText: 'meta-llama/llama-3.1-70b-instruct - $0.000001/1K tokens' },
+    { id: 'meta-llama/llama-3.1-8b-instruct', name: 'Llama 3.1 8B', pricing: 0.00000006, displayText: 'meta-llama/llama-3.1-8b-instruct - $0.000000/1K tokens' }
+  ];
 
   function setStatus(msg) { statusEl.textContent = msg; }
   function setSaveDot(state) {
@@ -714,9 +722,28 @@
     document.getElementById("header-btn").addEventListener("click", () => { toggleHeading(1); headingSel.value = "1"; updatePreview(); });
     headingSel.addEventListener("change", () => { const lvl = parseInt(headingSel.value, 10); if (!isNaN(lvl)) { toggleHeading(lvl); updatePreview(); } });
 
-    // Preview mode toggles
-    togglePreviewBtn.addEventListener("click", () => { const mode = document.body.getAttribute("data-mode"); document.body.setAttribute("data-mode", mode === "preview" ? "edit" : "preview"); updatePreview(); });
-    toggleSplitBtn.addEventListener("click", () => { const mode = document.body.getAttribute("data-mode"); document.body.setAttribute("data-mode", mode === "split" ? "edit" : "split"); updatePreview(); });
+    // Preview mode toggles - with retry to ensure DOM is ready
+    function bindPreviewEvents() {
+      const previewBtn = document.getElementById("toggle-preview");
+      const splitBtn = document.getElementById("toggle-split");
+      
+      if (previewBtn && splitBtn) {
+        previewBtn.addEventListener("click", () => { 
+          const mode = document.body.getAttribute("data-mode"); 
+          document.body.setAttribute("data-mode", mode === "preview" ? "edit" : "preview"); 
+          updatePreview(); 
+        });
+        splitBtn.addEventListener("click", () => { 
+          const mode = document.body.getAttribute("data-mode"); 
+          document.body.setAttribute("data-mode", mode === "split" ? "edit" : "split"); 
+          updatePreview(); 
+        });
+      } else {
+        // Retry after a delay if buttons not found
+        setTimeout(bindPreviewEvents, 100);
+      }
+    }
+    bindPreviewEvents();
 
     // Save button in drawer
     metaSaveNow.addEventListener('click', () => flushSave());
@@ -884,7 +911,70 @@
   // =========================
   function escapeHtml(str){ return String(str).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
   function applyInline(md){ let s = escapeHtml(md); s = s.replace(/\[([^\]]*)\]/g, ''); s = s.replace(/\*\*([^\n*]+)\*\*/g, '<strong>$1</strong>'); s = s.replace(/(^|[^*])\*([^\n*]+)\*(?!\*)/g, '$1<em>$2</em>'); s = s.replace(/&lt;u&gt;([\s\S]*?)&lt;\/u&gt;/g, '<u>$1</u>'); return s; }
-  function renderMarkdown(md){ const lines = md.replace(/\r\n/g,'\n').split('\n'); let html = ''; let inList = false; const flushList = () => { if (inList) { html += '</ul>'; inList = false; } }; let emptyLineCount = 0; for (let i=0;i<lines.length;i++){ const line = lines[i]; const h = line.match(/^(#{1,6})\s+(.*)$/); if (h){ flushList(); const lvl = h[1].length; const text = h[2]; html += `<h${lvl}>${applyInline(text)}</h${lvl}>`; emptyLineCount = 0; continue; } const b = line.match(/^\s*-\s+(.*)$/); if (b){ if (!inList){ html += '<ul>'; inList = true; } html += `<li>${applyInline(b[1])}</li>`; emptyLineCount = 0; continue; } if (/^\s*$/.test(line)) { emptyLineCount++; if (emptyLineCount >= 2) { flushList(); html += '<div style="margin-bottom: 0.75em;"></div>'; emptyLineCount = 0; } else if (emptyLineCount === 1) { flushList(); html += '<br />'; } continue; } flushList(); html += `<p>${applyInline(line)}</p>`; emptyLineCount = 0; } flushList(); return sanitizeHTML(html); }
+  function renderMarkdown(md){ 
+    const lines = md.replace(/\r\n/g,'\n').split('\n'); 
+    let html = ''; 
+    let inList = false; 
+    const flushList = () => { if (inList) { html += '</ul>'; inList = false; } }; 
+    
+    // Process lines and handle multiple empty lines
+    for (let i = 0; i < lines.length; i++) { 
+      const line = lines[i]; 
+      
+      // Check for headers
+      const h = line.match(/^(#{1,6})\s+(.*)$/); 
+      if (h){ 
+        flushList(); 
+        const lvl = h[1].length; 
+        const text = h[2]; 
+        html += `<h${lvl}>${applyInline(text)}</h${lvl}>`; 
+        continue; 
+      } 
+      
+      // Check for bulleted lists
+      const b = line.match(/^\s*-\s+(.*)$/); 
+      if (b){ 
+        if (!inList){ html += '<ul>'; inList = true; } 
+        html += `<li>${applyInline(b[1])}</li>`; 
+        continue; 
+      } 
+      
+      // Handle empty lines - look ahead for multiple consecutive empty lines
+      if (/^\s*$/.test(line)) { 
+        flushList(); 
+        
+        // Count consecutive empty lines
+        let emptyCount = 1;
+        let j = i + 1;
+        while (j < lines.length && /^\s*$/.test(lines[j])) {
+          emptyCount++;
+          j++;
+        }
+        
+        if (emptyCount >= 3) {
+          // 3+ empty lines = 1.5x spacing
+          html += '<div style="margin-bottom: 0.75em;"></div>'; 
+        } else if (emptyCount === 2) {
+          // 2 empty lines = 1.5x spacing
+          html += '<div style="margin-bottom: 0.75em;"></div>'; 
+        } else {
+          // Single empty line = normal break
+          html += '<br />'; 
+        }
+        
+        // Skip the counted empty lines
+        i = j - 1;
+        continue; 
+      } 
+      
+      // Regular paragraph
+      flushList(); 
+      html += `<p>${applyInline(line)}</p>`; 
+    } 
+    
+    flushList(); 
+    return sanitizeHTML(html); 
+  }
   function sanitizeHTML(html){ const allowed = new Set(['H1','H2','H3','H4','H5','H6','P','STRONG','EM','U','UL','LI','BR']); const tmp = document.createElement('div'); tmp.innerHTML = html; (function walk(node){ const children = Array.from(node.childNodes); for (const child of children){ if (child.nodeType === 1){ if (!allowed.has(child.tagName)){ while (child.firstChild) node.insertBefore(child.firstChild, child); node.removeChild(child); continue; } const attrs = Array.from(child.attributes); for (const a of attrs) child.removeAttribute(a.name); walk(child); } } })(tmp); return tmp.innerHTML; }
   function updatePreview(){ previewEl.innerHTML = renderMarkdown(editor.value || ''); }
 
