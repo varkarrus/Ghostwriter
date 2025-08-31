@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Ghostwriter POC — Drive-only Sync (Plain Text)</title>
+  <title>GhostWriter — Drive-only Sync + Markdown Formatting</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <!-- Google Identity Services (OAuth in browser) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -15,12 +15,12 @@
     header, footer { background: var(--muted); border-bottom: 1px solid var(--line); }
     footer { border-top: 1px solid var(--line); border-bottom: none; font-size: 12px; color: var(--sub); padding: 10px 14px; display:flex; gap:10px; align-items:center; }
     .toolbar { padding: 10px 14px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .toolbar button { padding: 8px 10px; border: 1px solid var(--line); background: #fff; border-radius: 10px; cursor: pointer; }
+    .toolbar .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .toolbar button, .toolbar select { padding: 8px 10px; border: 1px solid var(--line); background: #fff; border-radius: 10px; cursor: pointer; }
     .toolbar button[disabled] { opacity: 0.5; cursor: not-allowed; }
     .toolbar input[type="text"] { flex: 1; min-width: 220px; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
     #editor { width: 100%; height: 100%; padding: 16px; border: none; outline: none; resize: none; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
     .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; background: #eee; font-size: 12px; }
-    .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     #list-panel { max-height: 40vh; overflow: auto; border-top: 1px solid var(--line); background: #fff; display: none; }
     #list-panel table { width: 100%; border-collapse: collapse; font-size: 13px; }
     #list-panel th, #list-panel td { padding: 8px 12px; border-bottom: 1px solid var(--line); }
@@ -46,6 +46,22 @@
         <button id="create-file-btn" disabled>Create new file</button>
         <input id="file-id-input" type="text" placeholder="Paste File ID and press Enter (or use ?file=...)" />
         <button id="list-btn" disabled>My files</button>
+      </div>
+      <div class="row" id="formatting-row" title="Formatting inserts Markdown/HTML into the plaintext">
+        <button id="bold-btn" aria-label="Bold (Ctrl/⌘+B)"><strong>B</strong></button>
+        <button id="italic-btn" aria-label="Italic (Ctrl/⌘+I)"><em>I</em></button>
+        <button id="underline-btn" aria-label="Underline (Ctrl/⌘+U)"><u>U</u></button>
+        <button id="bullet-btn" aria-label="Bulleted list (Ctrl/⌘+Shift+8)">• List</button>
+        <label for="heading-select" class="pill" style="background:#fff;border:1px solid var(--line)">Hdr</label>
+        <select id="heading-select" aria-label="Heading">
+          <option value="0">Paragraph</option>
+          <option value="1">H1</option>
+          <option value="2">H2</option>
+          <option value="3">H3</option>
+          <option value="4">H4</option>
+          <option value="5">H5</option>
+          <option value="6">H6</option>
+        </select>
       </div>
     </div>
     <div id="list-panel">
@@ -100,6 +116,11 @@
   const listBody     = document.getElementById("list-body");
   const saveDot      = document.getElementById("save-indicator");
   const syncNote     = document.getElementById("sync-note");
+  const boldBtn      = document.getElementById("bold-btn");
+  const italicBtn    = document.getElementById("italic-btn");
+  const underlineBtn = document.getElementById("underline-btn");
+  const bulletBtn    = document.getElementById("bullet-btn");
+  const headingSel   = document.getElementById("heading-select");
 
   // =========================
   //  Auth & state
@@ -133,6 +154,7 @@
     signoutBtn.disabled = !signedIn;
     listBtn.disabled = !signedIn;
     fileIdInput.disabled = !signedIn;
+    [boldBtn, italicBtn, underlineBtn, bulletBtn, headingSel].forEach(el => el.disabled = !signedIn);
   }
   function getQueryFileId() {
     const p = new URLSearchParams(location.search);
@@ -207,25 +229,169 @@
     }));
 
     // Typing: mark dirty and schedule autosave
-    editor.addEventListener("input", () => {
-      dirty = true;
-      lastInputTs = Date.now();
-      setSaveDot("saving");
-      scheduleAutosave();
-    });
+    editor.addEventListener("input", () => { markDirty(); });
 
     // Try to flush on tab close/background
     window.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave({ silent:true }); });
     window.addEventListener("beforeunload", () => { flushSave({ silent:true }); });
 
-    // Power-user: Ctrl/⌘+S forces an immediate save
+    // Keyboard shortcuts
     window.addEventListener("keydown", (e) => {
-      const isMeta = navigator.platform.toLowerCase().includes("mac") ? e.metaKey : e.ctrlKey;
-      if (isMeta && e.key.toLowerCase() === "s") {
-        e.preventDefault();
-        flushSave();
+      const isMac = navigator.platform.toLowerCase().includes("mac");
+      const primary = isMac ? e.metaKey : e.ctrlKey;
+      // Save
+      if (primary && e.key.toLowerCase() === "s") { e.preventDefault(); flushSave(); return; }
+      // Bold
+      if (primary && e.key.toLowerCase() === "b") { e.preventDefault(); toggleBold(); return; }
+      // Italic
+      if (primary && e.key.toLowerCase() === "i") { e.preventDefault(); toggleItalic(); return; }
+      // Underline
+      if (primary && e.key.toLowerCase() === "u") { e.preventDefault(); toggleUnderline(); return; }
+      // Bullets (Ctrl/⌘+Shift+8 like Google Docs)
+      if (primary && e.shiftKey && e.key === "8") { e.preventDefault(); toggleBulleted(); return; }
+      // Headings (Ctrl/⌘+1..6)
+      if (primary && /^[1-6]$/.test(e.key)) { e.preventDefault(); toggleHeading(parseInt(e.key,10)); headingSel.value = e.key; return; }
+      // Tab to indent bullets, Shift+Tab to outdent
+      if (e.key === "Tab") {
+        const { start, end } = getSelection(editor);
+        const lines = getSelectedLineRange(editor.value, start, end);
+        if (lines.text.match(/^(-\s|\s*)/m)) { // likely list-y
+          e.preventDefault();
+          if (e.shiftKey) outdentSelection(); else indentSelection();
+        }
       }
     });
+
+    // Toolbar
+    boldBtn.addEventListener("click", toggleBold);
+    italicBtn.addEventListener("click", toggleItalic);
+    underlineBtn.addEventListener("click", toggleUnderline);
+    bulletBtn.addEventListener("click", toggleBulleted);
+    headingSel.addEventListener("change", () => {
+      const lvl = parseInt(headingSel.value, 10);
+      if (!isNaN(lvl)) toggleHeading(lvl);
+    });
+  }
+
+  // =========================
+  //  Formatting helpers (Markdown-in-plaintext)
+  // =========================
+  function getSelection(el){ return { start: el.selectionStart, end: el.selectionEnd, value: el.value }; }
+  function setSelection(el, start, end){ el.setSelectionRange(start, end); }
+  function markDirty(){
+    dirty = true;
+    lastInputTs = Date.now();
+    setSaveDot("saving");
+    scheduleAutosave();
+  }
+  function applyChange(newValue, selStart, selEnd){
+    editor.value = newValue;
+    setSelection(editor, selStart, selEnd);
+    markDirty();
+  }
+
+  function wrapOrUnwrapSelection(markerL, markerR, { altL = [], altR = [] } = {}){
+    const { start, end, value } = getSelection(editor);
+    const sel = value.slice(start, end);
+    const before = value.slice(0, start);
+    const after  = value.slice(end);
+
+    // Detect wrapped
+    const allL = [markerL, ...altL];
+    const allR = [markerR, ...altR];
+    const isWrapped = allL.some((L,i) => sel.startsWith(L) && sel.endsWith(allR[i] || markerR));
+
+    if (isWrapped) {
+      // unwrap
+      let unwrapped = sel;
+      allL.forEach((L,i)=>{
+        const R = allR[i] || markerR;
+        if (unwrapped.startsWith(L) && unwrapped.endsWith(R)) {
+          unwrapped = unwrapped.slice(L.length, unwrapped.length - R.length);
+        }
+      });
+      applyChange(before + unwrapped + after, start, start + unwrapped.length);
+    } else {
+      // wrap; if empty selection, place caret inside
+      const insertL = markerL; const insertR = markerR;
+      if (start === end) {
+        const nv = before + insertL + insertR + after;
+        const caret = (before + insertL).length;
+        applyChange(nv, caret, caret);
+      } else {
+        const nv = before + insertL + sel + insertR + after;
+        applyChange(nv, start + insertL.length, start + insertL.length + sel.length);
+      }
+    }
+  }
+
+  function toggleBold(){ wrapOrUnwrapSelection("**", "**", { altL:["__"], altR:["__"] }); }
+  function toggleItalic(){ wrapOrUnwrapSelection("*", "*", { altL:["_"], altR:["_"] }); }
+  // Markdown has no native underline; HTML tags are valid in Markdown, so we use <u>text</u>
+  function toggleUnderline(){ wrapOrUnwrapSelection("<u>", "</u>"); }
+
+  function getSelectedLineRange(text, start, end){
+    const lineStart = text.lastIndexOf("\n", start - 1) + 1; // -1 -> 0
+    let lineEnd = text.indexOf("\n", end);
+    if (lineEnd === -1) lineEnd = text.length;
+    return { start: lineStart, end: lineEnd, text: text.slice(lineStart, lineEnd) };
+  }
+
+  function toggleBulleted(){
+    const { start, end, value } = getSelection(editor);
+    const range = getSelectedLineRange(value, start, end);
+    const lines = value.slice(range.start, range.end).split("\n");
+    const allBulleted = lines.every(l => /^\s*-\s/.test(l) || l.trim() === "");
+    const changed = lines.map(l => {
+      if (l.trim() === "") return l; // keep blank lines
+      if (allBulleted) return l.replace(/^\s*-\s?/, "");
+      return l.replace(/^\s*/, "$&- ");
+    }).join("\n");
+    const nv = value.slice(0, range.start) + changed + value.slice(range.end);
+    const delta = changed.length - (range.end - range.start);
+    applyChange(nv, start + (start - range.start), end + delta - (range.end - end));
+  }
+
+  function toggleHeading(level){
+    const { start, end, value } = getSelection(editor);
+    const range = getSelectedLineRange(value, start, end);
+    const lines = range.text.split("\n");
+    const prefix = "#".repeat(Math.min(Math.max(level,0),6));
+    const changed = lines.map(l => {
+      if (l.trim() === "") return l; // keep blank lines
+      const cur = l.match(/^\s*(#{1,6})\s+/);
+      if (level === 0) { // Paragraph
+        return cur ? l.replace(/^\s*#{1,6}\s+/, "") : l;
+      }
+      if (cur && cur[1].length === level) {
+        // toggle off if exactly same level
+        return l.replace(/^\s*#{1,6}\s+/, "");
+      }
+      // replace any existing heading with desired
+      return l.replace(/^\s*(#{1,6}\s+)?/, prefix + " ");
+    }).join("\n");
+    const nv = value.slice(0, range.start) + changed + value.slice(range.end);
+    const delta = changed.length - (range.end - range.start);
+    applyChange(nv, start, end + delta);
+  }
+
+  function indentSelection(){
+    const { start, end, value } = getSelection(editor);
+    const range = getSelectedLineRange(value, start, end);
+    const lines = range.text.split("\n");
+    const changed = lines.map(l => l.trim() === "" ? l : "  " + l).join("\n");
+    const nv = value.slice(0, range.start) + changed + value.slice(range.end);
+    const delta = changed.length - (range.end - range.start);
+    applyChange(nv, start + 2, end + delta + 2);
+  }
+  function outdentSelection(){
+    const { start, end, value } = getSelection(editor);
+    const range = getSelectedLineRange(value, start, end);
+    const lines = range.text.split("\n");
+    const changed = lines.map(l => l.replace(/^ {1,2}/, "")).join("\n");
+    const nv = value.slice(0, range.start) + changed + value.slice(range.end);
+    const delta = changed.length - (range.end - range.start);
+    applyChange(nv, Math.max(range.start, start - 2), Math.max(range.start, end + delta - 2));
   }
 
   // =========================
@@ -237,20 +403,12 @@
     const boundary = "-------storypad-" + Math.random().toString(36).slice(2);
     const metadata = { name, mimeType: "text/plain", appProperties: { storypad: "1" } };
     const body =
-      `--${boundary}
-` +
-      `Content-Type: application/json; charset=UTF-8
-
-` +
-      JSON.stringify(metadata) + `
-` +
-      `--${boundary}
-` +
-      `Content-Type: text/plain; charset=UTF-8
-
-` +
-      (text || "") + `
-` +
+      `--${boundary}\r\n` +
+      `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+      JSON.stringify(metadata) + `\r\n` +
+      `--${boundary}\r\n` +
+      `Content-Type: text/plain; charset=UTF-8\r\n\r\n` +
+      (text || "") + `\r\n` +
       `--${boundary}--`;
 
     const res = await fetch(`${DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,webViewLink,modifiedTime`, {
@@ -331,7 +489,6 @@
   async function loadFile(id) {
     try {
       setStatus("Loading file…");
-      // Get metadata first to track remote state
       const meta = await getMeta(id);
       const text = await downloadTextFile(id);
       editor.value = text;
@@ -364,7 +521,6 @@
       isSaving = false;
       setSaveDot("saved");
       if (!opts.silent) setStatus("Saved.");
-      // Clear note after a moment
       syncNote.textContent = `Auto-saved at ${new Date().toLocaleTimeString()}`;
       setTimeout(() => { if (!dirty) setSaveDot("idle"); }, 1200);
     } catch (e) {
@@ -375,15 +531,11 @@
     }
   }
 
-  function startPolling(){
-    stopPolling();
-    pollTimer = setInterval(checkRemoteChanges, POLL_INTERVAL);
-  }
+  function startPolling(){ stopPolling(); pollTimer = setInterval(checkRemoteChanges, POLL_INTERVAL); }
   function stopPolling(){ if (pollTimer) clearInterval(pollTimer); pollTimer = null; }
 
   async function checkRemoteChanges(){
     if (!currentFileId || !accessToken) return;
-    // don't interrupt active typing or saving
     const now = Date.now();
     if (isSaving) return;
     if (dirty && now - lastInputTs < IDLE_GRACE) return;
@@ -392,8 +544,6 @@
       const meta = await getMeta(currentFileId);
       const remoteTs = Date.parse(meta.modifiedTime || 0);
       const remoteMd5 = meta.md5Checksum || null;
-
-      // Only pull when remote changed and we're idle
       if (remoteTs > lastRemoteModified && !dirty) {
         const text = await downloadTextFile(currentFileId);
         editor.value = text;
@@ -402,9 +552,7 @@
         syncNote.textContent = `Updated from Drive at ${new Date().toLocaleTimeString()}`;
         setStatus("Pulled latest changes from Drive.");
       }
-    } catch (e) {
-      console.warn("Polling error", e);
-    }
+    } catch (e) { console.warn("Polling error", e); }
   }
 
   async function refreshList() {
@@ -417,7 +565,6 @@
         const link = `https://drive.google.com/file/d/${f.id}/view`;
         return `<tr><td>${escapeHtml(f.name)}</td><td>${when}</td><td>${openHere} <a href="${link}" target="_blank" rel="noreferrer">Drive</a></td></tr>`;
       }).join("");
-      // Attach open handlers
       listBody.querySelectorAll("button[data-open]").forEach(btn => {
         btn.addEventListener("click", () => loadFile(btn.getAttribute("data-open")));
       });
