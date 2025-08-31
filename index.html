@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>GhostWriter — Drive-only + Markdown + Live Preview</title>
+  <title>GhostWriter — Drive-only + Markdown + JSON Header</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <!-- Google Identity Services (OAuth in browser) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -11,7 +11,7 @@
     * { box-sizing: border-box; }
     html, body { height: 100%; }
     body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    .app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
+    .app { display: grid; grid-template-rows: auto auto 1fr auto; height: 100vh; }
     header, footer { background: var(--muted); border-bottom: 1px solid var(--line); }
     footer { border-top: 1px solid var(--line); border-bottom: none; font-size: 12px; color: var(--sub); padding: 10px 14px; display:flex; gap:10px; align-items:center; }
     .toolbar { padding: 10px 14px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -19,6 +19,13 @@
     .toolbar button, .toolbar select { padding: 8px 10px; border: 1px solid var(--line); background: #fff; border-radius: 10px; cursor: pointer; }
     .toolbar button[disabled] { opacity: 0.5; cursor: not-allowed; }
     .toolbar input[type="text"] { flex: 1; min-width: 220px; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
+
+    /* Metadata panel */
+    #meta-panel { padding: 8px 14px; border-bottom: 1px solid var(--line); background:#fff; display: grid; grid-template-columns: 1fr; gap: 8px; }
+    #meta-panel .row { display:grid; grid-template-columns: 160px 1fr auto; align-items: start; gap: 8px; }
+    #meta-panel label { font-size: 12px; color: #333; }
+    #meta-panel textarea { width: 100%; min-height: 60px; max-height: 40vh; padding: 8px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    #meta-toggle { padding: 6px 10px; border: 1px solid var(--line); background:#fff; border-radius: 8px; cursor: pointer; }
 
     /* Main editor/preview area */
     main.main { display: grid; grid-template-columns: 1fr; height: 100%; min-height: 0; }
@@ -96,6 +103,22 @@
     </div>
   </header>
 
+  <!-- Metadata UI (stored in JSON header, not shown in the editor text) -->
+  <section id="meta-panel">
+    <div class="row">
+      <label for="ai-pre">AI Pre‑prompt</label>
+      <textarea id="ai-pre" placeholder="System-style guidance for the model…"></textarea>
+      <button id="meta-toggle" title="Collapse/Expand metadata">Hide</button>
+    </div>
+    <div class="row">
+      <label for="next-inst">Next Instructions</label>
+      <textarea id="next-inst" placeholder="One-off steering for the next generation…"></textarea>
+      <label style="display:flex;align-items:center;gap:6px;justify-self:end">
+        <input type="checkbox" id="next-enabled" /> Enable
+      </label>
+    </div>
+  </section>
+
   <main class="main">
     <div id="editor-wrap">
       <textarea id="editor" placeholder="Write your story here…"></textarea>
@@ -115,19 +138,26 @@
   // =========================
   //  Configuration
   // =========================
-  // OAuth 2.0 Web client ID (public identifier)
-  const CLIENT_ID = "389780383024-03s13biqo3n1hvdv2mn8jb2fcvc17ks3.apps.googleusercontent.com";
-  // Narrow Drive scope: create/read/update files this app created or explicitly opened with it.
-  const SCOPE = "https://www.googleapis.com/auth/drive.file";
+  const CLIENT_ID = "YOUR_GOOGLE_OAUTH_CLIENT_ID_HERE"; // OAuth 2.0 Web client ID (public)
+  const SCOPE = "https://www.googleapis.com/auth/drive.file"; // narrow Drive scope
 
-  // Drive REST endpoints
   const DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files";
   const DRIVE_FILES_URL  = "https://www.googleapis.com/drive/v3/files";
 
   // Autosave + polling
-  const AUTOSAVE_DELAY = 1200;     // ms after last keystroke
-  const POLL_INTERVAL  = 8000;     // ms between remote checks
-  const IDLE_GRACE     = 1200;     // ms considered "still typing"
+  const AUTOSAVE_DELAY = 1200;  // ms after last keystroke
+  const POLL_INTERVAL  = 8000;  // ms between remote checks
+  const IDLE_GRACE     = 1200;  // ms considered "still typing"
+
+  // File format sentinels for JSON header
+  const META_START = ";;;GW:JSON-START";
+  const META_END   = ";;;GW:JSON-END";
+
+  const DEFAULT_META = {
+    ai_pre_prompt: "",
+    next_instructions: "",
+    next_instructions_enabled: false
+  };
 
   // =========================
   //  DOM
@@ -153,6 +183,11 @@
   const togglePreviewBtn = document.getElementById("toggle-preview");
   const toggleSplitBtn   = document.getElementById("toggle-split");
   const previewEl    = document.getElementById("preview");
+  const metaPanel    = document.getElementById("meta-panel");
+  const metaToggle   = document.getElementById("meta-toggle");
+  const aiPreInput   = document.getElementById("ai-pre");
+  const nextInstInput= document.getElementById("next-inst");
+  const nextEnabled  = document.getElementById("next-enabled");
 
   // =========================
   //  Auth & state
@@ -164,10 +199,9 @@
   let autosaveTimer = null;
   let pollTimer = null;
   let isSaving = false;
-  let dirty = false;           // local edits since last save
-  let lastInputTs = 0;         // timestamp of last keystroke
+  let dirty = false;           // local edits (editor or metadata) since last save
+  let lastInputTs = 0;         // timestamp of last edit
   let lastRemoteModified = 0;  // ms
-  let lastRemoteMd5 = null;
 
   function setStatus(msg) { statusEl.textContent = msg; }
   function setSaveDot(state) {
@@ -186,15 +220,11 @@
     signoutBtn.disabled = !signedIn;
     listBtn.disabled = !signedIn;
     fileIdInput.disabled = !signedIn;
-    [boldBtn, italicBtn, underlineBtn, bulletBtn, headingSel, togglePreviewBtn, toggleSplitBtn].forEach(el => el.disabled = !signedIn);
+    [boldBtn, italicBtn, underlineBtn, bulletBtn, headingSel, togglePreviewBtn, toggleSplitBtn, aiPreInput, nextInstInput, nextEnabled, metaToggle].forEach(el => el.disabled = !signedIn);
   }
-  function getQueryFileId() {
-    const p = new URLSearchParams(location.search);
-    return p.get("file");
-  }
+  function getQueryFileId() { const p = new URLSearchParams(location.search); return p.get("file"); }
 
   window.addEventListener("load", () => {
-    // Wait for GIS to be present
     const waitFor = (cond) => new Promise(res => { const t = () => cond() ? res() : setTimeout(t, 50); t(); });
     waitFor(() => window.google && google.accounts && google.accounts.oauth2).then(() => {
       tokenClient = google.accounts.oauth2.initTokenClient({
@@ -205,7 +235,6 @@
           accessToken = resp.access_token;
           setStatus("Signed in.");
           setSignedInUI(true);
-          // Auto-open if ?file= is present
           const preset = getQueryFileId();
           if (preset) { fileIdInput.value = preset; loadFile(preset); }
         }
@@ -227,43 +256,36 @@
   }
 
   function wireEvents() {
-    authBtn.addEventListener("click", () => {
-      setStatus("Opening Google sign-in…");
-      tokenClient.requestAccessToken({ prompt: "consent" });
-    });
+    document.getElementById("auth-btn").addEventListener("click", () => { setStatus("Opening Google sign-in…"); tokenClient.requestAccessToken({ prompt: "consent" }); });
     signoutBtn.addEventListener("click", () => {
       if (accessToken) {
         stopPolling();
-        google.accounts.oauth2.revoke(accessToken, () => {
-          accessToken = null;
-          setSignedInUI(false);
-          setActiveFile(null, null);
-          setStatus("Signed out.");
-        });
+        google.accounts.oauth2.revoke(accessToken, () => { accessToken = null; setSignedInUI(false); setActiveFile(null, null); setStatus("Signed out."); });
       }
     });
 
     createBtn.addEventListener("click", ensureAuth("creating a file", createNewFile));
 
-    // Paste an ID and press Enter to open
-    fileIdInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        const id = fileIdInput.value.trim();
-        if (id) ensureAuth("opening a file", () => loadFile(id))();
-      }
-    });
+    fileIdInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { const id = fileIdInput.value.trim(); if (id) ensureAuth("opening a file", () => loadFile(id))(); } });
 
-    listBtn.addEventListener("click", ensureAuth("listing files", async () => {
-      listPanel.style.display = listPanel.style.display === "none" ? "block" : "none";
-      if (listPanel.style.display === "block") {
-        await refreshList();
-      }
-    }));
+    listBtn.addEventListener("click", ensureAuth("listing files", async () => { listPanel.style.display = listPanel.style.display === "none" ? "block" : "none"; if (listPanel.style.display === "block") { await refreshList(); } }));
 
-    // Typing: mark dirty and schedule autosave + update preview
+    // Editor typing => autosave & preview
     editor.addEventListener("input", () => { markDirty(); updatePreview(); });
 
-    // Try to flush on tab close/background
+    // Metadata edits => autosave
+    aiPreInput.addEventListener("input", () => { markDirty(); });
+    nextInstInput.addEventListener("input", () => { markDirty(); });
+    nextEnabled.addEventListener("change", () => { markDirty(); });
+
+    // Collapse/expand meta panel
+    metaToggle.addEventListener("click", () => {
+      const hidden = metaPanel.getAttribute("data-hidden") === "1";
+      metaPanel.setAttribute("data-hidden", hidden ? "0" : "1");
+      metaPanel.style.display = hidden ? "grid" : "none";
+      metaToggle.textContent = hidden ? "Hide" : "Show";
+    });
+
     window.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave({ silent:true }); });
     window.addEventListener("beforeunload", () => { flushSave({ silent:true }); });
 
@@ -271,51 +293,63 @@
     window.addEventListener("keydown", (e) => {
       const isMac = navigator.platform.toLowerCase().includes("mac");
       const primary = isMac ? e.metaKey : e.ctrlKey;
-      // Save
       if (primary && e.key.toLowerCase() === "s") { e.preventDefault(); flushSave(); return; }
-      // Bold
       if (primary && e.key.toLowerCase() === "b") { e.preventDefault(); toggleBold(); return; }
-      // Italic
       if (primary && e.key.toLowerCase() === "i") { e.preventDefault(); toggleItalic(); return; }
-      // Underline
       if (primary && e.key.toLowerCase() === "u") { e.preventDefault(); toggleUnderline(); return; }
-      // Bullets (Ctrl/⌘+Shift+8 like Google Docs)
       if (primary && e.shiftKey && e.key === "8") { e.preventDefault(); toggleBulleted(); return; }
-      // Headings (Ctrl/⌘+1..6)
       if (primary && /^[1-6]$/.test(e.key)) { e.preventDefault(); toggleHeading(parseInt(e.key,10)); headingSel.value = e.key; return; }
-      // Tab to indent bullets, Shift+Tab to outdent
       if (e.key === "Tab") {
         const { start, end } = getSelection(editor);
         const lines = getSelectedLineRange(editor.value, start, end);
-        if (lines.text.match(/^(\-\s|\s*)/m)) { // likely list-y
-          e.preventDefault();
-          if (e.shiftKey) outdentSelection(); else indentSelection();
-        }
+        if (lines.text.match(/^(\-\s|\s*)/m)) { e.preventDefault(); if (e.shiftKey) outdentSelection(); else indentSelection(); }
       }
     });
 
-    // Toolbar
-    boldBtn.addEventListener("click", () => { toggleBold(); updatePreview(); });
-    italicBtn.addEventListener("click", () => { toggleItalic(); updatePreview(); });
-    underlineBtn.addEventListener("click", () => { toggleUnderline(); updatePreview(); });
-    bulletBtn.addEventListener("click", () => { toggleBulleted(); updatePreview(); });
-    headingSel.addEventListener("change", () => {
-      const lvl = parseInt(headingSel.value, 10);
-      if (!isNaN(lvl)) { toggleHeading(lvl); updatePreview(); }
-    });
+    // Formatting toolbar
+    document.getElementById("bold-btn").addEventListener("click", () => { toggleBold(); updatePreview(); });
+    document.getElementById("italic-btn").addEventListener("click", () => { toggleItalic(); updatePreview(); });
+    document.getElementById("underline-btn").addEventListener("click", () => { toggleUnderline(); updatePreview(); });
+    document.getElementById("bullet-btn").addEventListener("click", () => { toggleBulleted(); updatePreview(); });
+    headingSel.addEventListener("change", () => { const lvl = parseInt(headingSel.value, 10); if (!isNaN(lvl)) { toggleHeading(lvl); updatePreview(); } });
 
-    togglePreviewBtn.addEventListener("click", () => {
-      const mode = document.body.getAttribute("data-mode");
-      const next = mode === "preview" ? "edit" : "preview";
-      document.body.setAttribute("data-mode", next);
-      updatePreview();
-    });
-    toggleSplitBtn.addEventListener("click", () => {
-      const mode = document.body.getAttribute("data-mode");
-      const next = mode === "split" ? "edit" : "split";
-      document.body.setAttribute("data-mode", next);
-      updatePreview();
-    });
+    // Preview mode toggles
+    togglePreviewBtn.addEventListener("click", () => { const mode = document.body.getAttribute("data-mode"); document.body.setAttribute("data-mode", mode === "preview" ? "edit" : "preview"); updatePreview(); });
+    toggleSplitBtn.addEventListener("click", () => { const mode = document.body.getAttribute("data-mode"); document.body.setAttribute("data-mode", mode === "split" ? "edit" : "split"); updatePreview(); });
+  }
+
+  // =========================
+  //  JSON header <-> UI
+  // =========================
+  function readMetaFromUI(){
+    return {
+      ai_pre_prompt: aiPreInput.value || "",
+      next_instructions: nextInstInput.value || "",
+      next_instructions_enabled: !!nextEnabled.checked
+    };
+  }
+  function writeMetaToUI(meta){
+    aiPreInput.value = meta.ai_pre_prompt || "";
+    nextInstInput.value = meta.next_instructions || "";
+    nextEnabled.checked = !!meta.next_instructions_enabled;
+  }
+
+  function buildFileText(meta, content){
+    const json = JSON.stringify(meta, null, 2);
+    return `${META_START}\n${json}\n${META_END}\n\n${content || ""}`;
+  }
+  function parseFileText(text){
+    try {
+      const s = text.indexOf(META_START);
+      const e = text.indexOf(META_END);
+      if (s !== -1 && e !== -1 && e > s){
+        const jsonStr = text.slice(s + META_START.length, e).trim();
+        const meta = JSON.parse(jsonStr);
+        const after = text.slice(e + META_END.length).replace(/^\s*\n?/, "");
+        return { meta: { ...DEFAULT_META, ...meta }, content: after };
+      }
+    } catch (err) { console.warn("Meta parse error; treating entire file as content.", err); }
+    return { meta: { ...DEFAULT_META }, content: text };
   }
 
   // =========================
@@ -323,277 +357,68 @@
   // =========================
   function getSelection(el){ return { start: el.selectionStart, end: el.selectionEnd, value: el.value }; }
   function setSelection(el, start, end){ el.setSelectionRange(start, end); }
-  function markDirty(){
-    dirty = true;
-    lastInputTs = Date.now();
-    setSaveDot("saving");
-    scheduleAutosave();
-  }
-  function applyChange(newValue, selStart, selEnd){
-    editor.value = newValue;
-    setSelection(editor, selStart, selEnd);
-    markDirty();
-  }
+  function markDirty(){ dirty = true; lastInputTs = Date.now(); setSaveDot("saving"); scheduleAutosave(); }
+  function applyChange(newValue, selStart, selEnd){ editor.value = newValue; setSelection(editor, selStart, selEnd); markDirty(); }
 
   function wrapOrUnwrapSelection(markerL, markerR, { altL = [], altR = [] } = {}){
     const { start, end, value } = getSelection(editor);
-    const sel = value.slice(start, end);
-    const before = value.slice(0, start);
-    const after  = value.slice(end);
-
-    const allL = [markerL, ...altL];
-    const allR = [markerR, ...altR];
+    const sel = value.slice(start, end); const before = value.slice(0, start); const after = value.slice(end);
+    const allL = [markerL, ...altL]; const allR = [markerR, ...altR];
     const isWrapped = allL.some((L,i) => sel.startsWith(L) && sel.endsWith(allR[i] || markerR));
-
     if (isWrapped) {
       let unwrapped = sel;
-      allL.forEach((L,i)=>{
-        const R = allR[i] || markerR;
-        if (unwrapped.startsWith(L) && unwrapped.endsWith(R)) {
-          unwrapped = unwrapped.slice(L.length, unwrapped.length - R.length);
-        }
-      });
+      allL.forEach((L,i)=>{ const R = allR[i] || markerR; if (unwrapped.startsWith(L) && unwrapped.endsWith(R)) { unwrapped = unwrapped.slice(L.length, unwrapped.length - R.length); } });
       applyChange(before + unwrapped + after, start, start + unwrapped.length);
     } else {
       const insertL = markerL; const insertR = markerR;
-      if (start === end) {
-        const nv = before + insertL + insertR + after;
-        const caret = (before + insertL).length;
-        applyChange(nv, caret, caret);
-      } else {
-        const nv = before + insertL + sel + insertR + after;
-        applyChange(nv, start + insertL.length, start + insertL.length + sel.length);
-      }
+      if (start === end) { const nv = before + insertL + insertR + after; const caret = (before + insertL).length; applyChange(nv, caret, caret); }
+      else { const nv = before + insertL + sel + insertR + after; applyChange(nv, start + insertL.length, start + insertL.length + sel.length); }
     }
   }
-
   function toggleBold(){ wrapOrUnwrapSelection("**", "**", { altL:["__"], altR:["__"] }); }
   function toggleItalic(){ wrapOrUnwrapSelection("*", "*", { altL:["_"], altR:["_"] }); }
   function toggleUnderline(){ wrapOrUnwrapSelection("<u>", "</u>"); }
 
-  function getSelectedLineRange(text, start, end){
-    const lineStart = text.lastIndexOf("\n", start - 1) + 1;
-    let lineEnd = text.indexOf("\n", end);
-    if (lineEnd === -1) lineEnd = text.length;
-    return { start: lineStart, end: lineEnd, text: text.slice(lineStart, lineEnd) };
-  }
-
-  function toggleBulleted(){
-    const { start, end, value } = getSelection(editor);
-    const range = getSelectedLineRange(value, start, end);
-    const lines = value.slice(range.start, range.end).split("\n");
-    const allBulleted = lines.every(l => /^\s*-\s/.test(l) || l.trim() === "");
-    const changed = lines.map(l => {
-      if (l.trim() === "") return l;
-      if (allBulleted) return l.replace(/^\s*-\s?/, "");
-      return l.replace(/^\s*/, "$&- ");
-    }).join("\n");
-    const nv = value.slice(0, range.start) + changed + value.slice(range.end);
-    const delta = changed.length - (range.end - range.start);
-    applyChange(nv, start + (start - range.start), end + delta - (range.end - end));
-  }
-
-  function toggleHeading(level){
-    const { start, end, value } = getSelection(editor);
-    const range = getSelectedLineRange(value, start, end);
-    const lines = range.text.split("\n");
-    const prefix = "#".repeat(Math.min(Math.max(level,0),6));
-    const changed = lines.map(l => {
-      if (l.trim() === "") return l;
-      const cur = l.match(/^\s*(#{1,6})\s+/);
-      if (level === 0) { return cur ? l.replace(/^\s*#{1,6}\s+/, "") : l; }
-      if (cur && cur[1].length === level) { return l.replace(/^\s*#{1,6}\s+/, ""); }
-      return l.replace(/^\s*(#{1,6}\s+)?/, prefix + " ");
-    }).join("\n");
-    const nv = value.slice(0, range.start) + changed + value.slice(range.end);
-    const delta = changed.length - (range.end - range.start);
-    applyChange(nv, start, end + delta);
-  }
-
-  function indentSelection(){
-    const { start, end, value } = getSelection(editor);
-    const range = getSelectedLineRange(value, start, end);
-    const lines = range.text.split("\n");
-    const changed = lines.map(l => l.trim() === "" ? l : "  " + l).join("\n");
-    const nv = value.slice(0, range.start) + changed + value.slice(range.end);
-    const delta = changed.length - (range.end - range.start);
-    applyChange(nv, start + 2, end + delta + 2);
-  }
-  function outdentSelection(){
-    const { start, end, value } = getSelection(editor);
-    const range = getSelectedLineRange(value, start, end);
-    const lines = range.text.split("\n");
-    const changed = lines.map(l => l.replace(/^ {1,2}/, "")).join("\n");
-    const nv = value.slice(0, range.start) + changed + value.slice(range.end);
-    const delta = changed.length - (range.end - range.start);
-    applyChange(nv, Math.max(range.start, start - 2), Math.max(range.start, end + delta - 2));
-  }
+  function getSelectedLineRange(text, start, end){ const lineStart = text.lastIndexOf("\n", start - 1) + 1; let lineEnd = text.indexOf("\n", end); if (lineEnd === -1) lineEnd = text.length; return { start: lineStart, end: lineEnd, text: text.slice(lineStart, lineEnd) }; }
+  function toggleBulleted(){ const { start, end, value } = getSelection(editor); const range = getSelectedLineRange(value, start, end); const lines = value.slice(range.start, range.end).split("\n"); const allBulleted = lines.every(l => /^\s*-\s/.test(l) || l.trim() === ""); const changed = lines.map(l => { if (l.trim() === "") return l; if (allBulleted) return l.replace(/^\s*-\s?/, ""); return l.replace(/^\s*/, "$&- "); }).join("\n"); const nv = value.slice(0, range.start) + changed + value.slice(range.end); const delta = changed.length - (range.end - range.start); applyChange(nv, start + (start - range.start), end + delta - (range.end - end)); }
+  function toggleHeading(level){ const { start, end, value } = getSelection(editor); const range = getSelectedLineRange(value, start, end); const lines = range.text.split("\n"); const prefix = "#".repeat(Math.min(Math.max(level,0),6)); const changed = lines.map(l => { if (l.trim() === "") return l; const cur = l.match(/^\s*(#{1,6})\s+/); if (level === 0) { return cur ? l.replace(/^\s*#{1,6}\s+/, "") : l; } if (cur && cur[1].length === level) { return l.replace(/^\s*#{1,6}\s+/, ""); } return l.replace(/^\s*(#{1,6}\s+)?/, prefix + " "); }).join("\n"); const nv = value.slice(0, range.start) + changed + value.slice(range.end); const delta = changed.length - (range.end - range.start); applyChange(nv, start, end + delta); }
+  function indentSelection(){ const { start, end, value } = getSelection(editor); const range = getSelectedLineRange(value, start, end); const lines = range.text.split("\n"); const changed = lines.map(l => l.trim() === "" ? l : "  " + l).join("\n"); const nv = value.slice(0, range.start) + changed + value.slice(range.end); const delta = changed.length - (range.end - range.start); applyChange(nv, start + 2, end + delta + 2); }
+  function outdentSelection(){ const { start, end, value } = getSelection(editor); const range = getSelectedLineRange(value, start, end); const lines = range.text.split("\n"); const changed = lines.map(l => l.replace(/^ {1,2}/, "")).join("\n"); const nv = value.slice(0, range.start) + changed + value.slice(range.end); const delta = changed.length - (range.end - range.start); applyChange(nv, Math.max(range.start, start - 2), Math.max(range.start, end + delta - 2)); }
 
   // =========================
   //  Markdown renderer (safe-ish)
   // =========================
-  function escapeHtml(str){
-    return String(str).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
-  }
-  function applyInline(md){
-    // Escape HTML first
-    let s = escapeHtml(md);
-    // Bold **text**
-    s = s.replace(/\*\*([^\n*]+)\*\*/g, '<strong>$1</strong>');
-    // Italic *text* (avoid **)
-    s = s.replace(/(^|[^*])\*([^\n*]+)\*(?!\*)/g, '$1<em>$2</em>');
-    // Underline via escaped tags
-    s = s.replace(/&lt;u&gt;([\s\S]*?)&lt;\/u&gt;/g, '<u>$1</u>');
-    return s;
-  }
-  function renderMarkdown(md){
-    const lines = md.replace(/\r\n/g,'\n').split('\n');
-    let html = '';
-    let inList = false;
-    const flushList = () => { if (inList) { html += '</ul>'; inList = false; } };
-
-    for (let i=0;i<lines.length;i++){
-      const line = lines[i];
-      // Headings
-      const h = line.match(/^(#{1,6})\s+(.*)$/);
-      if (h){
-        flushList();
-        const lvl = h[1].length; const text = h[2];
-        html += `<h${lvl}>${applyInline(text)}</h${lvl}>`;
-        continue;
-      }
-      // Bullets (single-level)
-      const b = line.match(/^\s*-\s+(.*)$/);
-      if (b){
-        if (!inList){ html += '<ul>'; inList = true; }
-        html += `<li>${applyInline(b[1])}</li>`;
-        continue;
-      }
-      // Blank line
-      if (/^\s*$/.test(line)) { flushList(); html += '<br />'; continue; }
-      // Paragraph line
-      flushList();
-      html += `<p>${applyInline(line)}</p>`;
-    }
-    flushList();
-    return sanitizeHTML(html);
-  }
-  function sanitizeHTML(html){
-    const allowed = new Set(['H1','H2','H3','H4','H5','H6','P','STRONG','EM','U','UL','LI','BR']);
-    const tmp = document.createElement('div');
-    tmp.innerHTML = html;
-    (function walk(node){
-      const children = Array.from(node.childNodes);
-      for (const child of children){
-        if (child.nodeType === 1){ // element
-          if (!allowed.has(child.tagName)){
-            // unwrap disallowed element, keep its children
-            while (child.firstChild) node.insertBefore(child.firstChild, child);
-            node.removeChild(child);
-            continue;
-          }
-          // strip attributes just in case
-          const attrs = Array.from(child.attributes);
-          for (const a of attrs) child.removeAttribute(a.name);
-          walk(child);
-        }
-      }
-    })(tmp);
-    return tmp.innerHTML;
-  }
-  function updatePreview(){
-    previewEl.innerHTML = renderMarkdown(editor.value || '');
-  }
+  function escapeHtml(str){ return String(str).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+  function applyInline(md){ let s = escapeHtml(md); s = s.replace(/\*\*([^\n*]+)\*\*/g, '<strong>$1</strong>'); s = s.replace(/(^|[^*])\*([^\n*]+)\*(?!\*)/g, '$1<em>$2</em>'); s = s.replace(/&lt;u&gt;([\s\S]*?)&lt;\/u&gt;/g, '<u>$1</u>'); return s; }
+  function renderMarkdown(md){ const lines = md.replace(/\r\n/g,'\n').split('\n'); let html = ''; let inList = false; const flushList = () => { if (inList) { html += '</ul>'; inList = false; } }; for (let i=0;i<lines.length;i++){ const line = lines[i]; const h = line.match(/^(#{1,6})\s+(.*)$/); if (h){ flushList(); const lvl = h[1].length; const text = h[2]; html += `<h${lvl}>${applyInline(text)}</h${lvl}>`; continue; } const b = line.match(/^\s*-\s+(.*)$/); if (b){ if (!inList){ html += '<ul>'; inList = true; } html += `<li>${applyInline(b[1])}</li>`; continue; } if (/^\s*$/.test(line)) { flushList(); html += '<br />'; continue; } flushList(); html += `<p>${applyInline(line)}</p>`; } flushList(); return sanitizeHTML(html); }
+  function sanitizeHTML(html){ const allowed = new Set(['H1','H2','H3','H4','H5','H6','P','STRONG','EM','U','UL','LI','BR']); const tmp = document.createElement('div'); tmp.innerHTML = html; (function walk(node){ const children = Array.from(node.childNodes); for (const child of children){ if (child.nodeType === 1){ if (!allowed.has(child.tagName)){ while (child.firstChild) node.insertBefore(child.firstChild, child); node.removeChild(child); continue; } const attrs = Array.from(child.attributes); for (const a of attrs) child.removeAttribute(a.name); walk(child); } } })(tmp); return tmp.innerHTML; }
+  function updatePreview(){ previewEl.innerHTML = renderMarkdown(editor.value || ''); }
 
   // =========================
   //  Drive helpers (fetch)
   // =========================
   function authHeader() { return { Authorization: `Bearer ${accessToken}` }; }
-
-  async function createTextFile(name, text) {
-    const boundary = "-------storypad-" + Math.random().toString(36).slice(2);
-    const metadata = { name, mimeType: "text/plain", appProperties: { storypad: "1" } };
-    const body =
-      `--${boundary}\r\n` +
-      `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
-      JSON.stringify(metadata) + `\r\n` +
-      `--${boundary}\r\n` +
-      `Content-Type: text/plain; charset=UTF-8\r\n\r\n` +
-      (text || "") + `\r\n` +
-      `--${boundary}--`;
-
-    const res = await fetch(`${DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,webViewLink,modifiedTime`, {
-      method: "POST",
-      headers: { ...authHeader(), "Content-Type": `multipart/related; boundary=${boundary}` },
-      body
-    });
-    if (res.status === 401) { await refreshToken(); return createTextFile(name, text); }
-    if (!res.ok) throw new Error(`Create failed: ${res.status}`);
-    return await res.json();
-  }
-
-  async function updateTextFile(fileId, text) {
-    const res = await fetch(`${DRIVE_UPLOAD_URL}/${fileId}?uploadType=media&fields=id,name,modifiedTime,webViewLink`, {
-      method: "PATCH",
-      headers: { ...authHeader(), "Content-Type": "text/plain; charset=UTF-8" },
-      body: text || ""
-    });
-    if (res.status === 401) { await refreshToken(); return updateTextFile(fileId, text); }
-    if (!res.ok) throw new Error(`Update failed: ${res.status}`);
-    return await res.json();
-  }
-
-  async function downloadTextFile(fileId) {
-    const res = await fetch(`${DRIVE_FILES_URL}/${fileId}?alt=media`, { headers: authHeader() });
-    if (res.status === 401) { await refreshToken(); return downloadTextFile(fileId); }
-    if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-    return await res.text();
-  }
-
-  async function getMeta(fileId) {
-    const res = await fetch(`${DRIVE_FILES_URL}/${fileId}?fields=id,name,modifiedTime,md5Checksum`, { headers: authHeader() });
-    if (res.status === 401) { await refreshToken(); return getMeta(fileId); }
-    if (!res.ok) throw new Error(`Meta failed: ${res.status}`);
-    return await res.json();
-  }
-
-  async function listStorypadFiles() {
-    const q = ["mimeType='text/plain'","appProperties has { key='storypad' and value='1' }"]; // only our files
-    const url = new URL(DRIVE_FILES_URL);
-    url.searchParams.set("q", q.join(" and "));
-    url.searchParams.set("orderBy", "modifiedTime desc");
-    url.searchParams.set("pageSize", "100");
-    url.searchParams.set("fields", "files(id,name,modifiedTime)");
-    const res = await fetch(url.toString(), { headers: authHeader() });
-    if (res.status === 401) { await refreshToken(); return listStorypadFiles(); }
-    if (!res.ok) throw new Error(`List failed: ${res.status}`);
-    const { files } = await res.json();
-    return files || [];
-  }
-
-  async function refreshToken(){
-    return new Promise((resolve) => {
-      tokenClient.callback = () => resolve();
-      tokenClient.requestAccessToken({ prompt: "" }); // silent refresh
-    });
-  }
+  async function createTextFile(name, text) { const boundary = "-------storypad-" + Math.random().toString(36).slice(2); const metadata = { name, mimeType: "text/plain", appProperties: { storypad: "1" } }; const body = `--${boundary}\r\n` + `Content-Type: application/json; charset=UTF-8\r\n\r\n` + JSON.stringify(metadata) + `\r\n` + `--${boundary}\r\n` + `Content-Type: text/plain; charset=UTF-8\r\n\r\n` + (text || "") + `\r\n` + `--${boundary}--`; const res = await fetch(`${DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,webViewLink,modifiedTime`, { method: "POST", headers: { ...authHeader(), "Content-Type": `multipart/related; boundary=${boundary}` }, body }); if (res.status === 401) { await refreshToken(); return createTextFile(name, text); } if (!res.ok) throw new Error(`Create failed: ${res.status}`); return await res.json(); }
+  async function updateTextFile(fileId, text) { const res = await fetch(`${DRIVE_UPLOAD_URL}/${fileId}?uploadType=media&fields=id,name,modifiedTime,webViewLink`, { method: "PATCH", headers: { ...authHeader(), "Content-Type": "text/plain; charset=UTF-8" }, body: text || "" }); if (res.status === 401) { await refreshToken(); return updateTextFile(fileId, text); } if (!res.ok) throw new Error(`Update failed: ${res.status}`); return await res.json(); }
+  async function downloadTextFile(fileId) { const res = await fetch(`${DRIVE_FILES_URL}/${fileId}?alt=media`, { headers: authHeader() }); if (res.status === 401) { await refreshToken(); return downloadTextFile(fileId); } if (!res.ok) throw new Error(`Download failed: ${res.status}`); return await res.text(); }
+  async function getMeta(fileId) { const res = await fetch(`${DRIVE_FILES_URL}/${fileId}?fields=id,name,modifiedTime`, { headers: authHeader() }); if (res.status === 401) { await refreshToken(); return getMeta(fileId); } if (!res.ok) throw new Error(`Meta failed: ${res.status}`); return await res.json(); }
+  async function listStorypadFiles() { const q = ["mimeType='text/plain'","appProperties has { key='storypad' and value='1' }"]; const url = new URL(DRIVE_FILES_URL); url.searchParams.set("q", q.join(" and ")); url.searchParams.set("orderBy", "modifiedTime desc"); url.searchParams.set("pageSize", "100"); url.searchParams.set("fields", "files(id,name,modifiedTime)"); const res = await fetch(url.toString(), { headers: authHeader() }); if (res.status === 401) { await refreshToken(); return listStorypadFiles(); } if (!res.ok) throw new Error(`List failed: ${res.status}`); const { files } = await res.json(); return files || []; }
+  async function refreshToken(){ return new Promise((resolve) => { tokenClient.callback = () => resolve(); tokenClient.requestAccessToken({ prompt: "" }); }); }
 
   // =========================
-  //  App actions
+  //  App actions (now include JSON header)
   // =========================
   async function createNewFile() {
     try {
       setStatus("Creating file…");
       const title = `StoryPad ${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
-      const meta = await createTextFile(title, editor.value || "");
+      const combined = buildFileText(readMetaFromUI(), editor.value || "");
+      const meta = await createTextFile(title, combined);
       setActiveFile(meta.id, meta.name);
       lastRemoteModified = Date.parse(meta.modifiedTime || Date.now());
       startPolling();
       setStatus("File created and syncing.");
-      // Update URL
-      const u = new URL(location.href);
-      u.searchParams.set("file", meta.id);
-      history.replaceState({}, "", u.toString());
+      const u = new URL(location.href); u.searchParams.set("file", meta.id); history.replaceState({}, "", u.toString());
       updatePreview();
     } catch (e) { console.error(e); setStatus("Failed to create file. See console."); }
   }
@@ -602,46 +427,33 @@
     try {
       setStatus("Loading file…");
       const meta = await getMeta(id);
-      const text = await downloadTextFile(id);
-      editor.value = text;
+      const raw = await downloadTextFile(id);
+      const parsed = parseFileText(raw);
+      writeMetaToUI(parsed.meta);
+      editor.value = parsed.content;
       setActiveFile(id, meta.name || "(unknown)");
       lastRemoteModified = Date.parse(meta.modifiedTime || 0);
-      lastRemoteMd5 = meta.md5Checksum || null;
       startPolling();
       setStatus("Loaded and syncing.");
-      const u = new URL(location.href);
-      u.searchParams.set("file", id);
-      history.replaceState({}, "", u.toString());
+      const u = new URL(location.href); u.searchParams.set("file", id); history.replaceState({}, "", u.toString());
       updatePreview();
     } catch (e) { console.error(e); setStatus("Failed to load file. Check ID and permissions."); }
   }
 
-  function scheduleAutosave(){
-    clearTimeout(autosaveTimer);
-    autosaveTimer = setTimeout(() => flushSave(), AUTOSAVE_DELAY);
-  }
+  function scheduleAutosave(){ clearTimeout(autosaveTimer); autosaveTimer = setTimeout(() => flushSave(), AUTOSAVE_DELAY); }
 
   async function flushSave(opts={}) {
     if (!currentFileId || !accessToken) return;
     if (!dirty && !opts.force) return;
     try {
-      isSaving = true;
-      setSaveDot("saving");
-      if (!opts.silent) setStatus("Saving…");
-      const res = await updateTextFile(currentFileId, editor.value);
+      isSaving = true; setSaveDot("saving"); if (!opts.silent) setStatus("Saving…");
+      const combined = buildFileText(readMetaFromUI(), editor.value);
+      const res = await updateTextFile(currentFileId, combined);
       lastRemoteModified = Date.parse(res.modifiedTime || Date.now());
-      dirty = false;
-      isSaving = false;
-      setSaveDot("saved");
-      if (!opts.silent) setStatus("Saved.");
+      dirty = false; isSaving = false; setSaveDot("saved"); if (!opts.silent) setStatus("Saved.");
       syncNote.textContent = `Auto-saved at ${new Date().toLocaleTimeString()}`;
       setTimeout(() => { if (!dirty) setSaveDot("idle"); }, 1200);
-    } catch (e) {
-      console.error(e);
-      isSaving = false;
-      setSaveDot("idle");
-      setStatus("Save failed. Will retry on next edit.");
-    }
+    } catch (e) { console.error(e); isSaving = false; setSaveDot("idle"); setStatus("Save failed. Will retry on next edit."); }
   }
 
   function startPolling(){ stopPolling(); pollTimer = setInterval(checkRemoteChanges, POLL_INTERVAL); }
@@ -652,16 +464,15 @@
     const now = Date.now();
     if (isSaving) return;
     if (dirty && now - lastInputTs < IDLE_GRACE) return;
-
     try {
       const meta = await getMeta(currentFileId);
       const remoteTs = Date.parse(meta.modifiedTime || 0);
-      const remoteMd5 = meta.md5Checksum || null;
       if (remoteTs > lastRemoteModified && !dirty) {
-        const text = await downloadTextFile(currentFileId);
-        editor.value = text;
+        const raw = await downloadTextFile(currentFileId);
+        const parsed = parseFileText(raw);
+        writeMetaToUI(parsed.meta);
+        editor.value = parsed.content;
         lastRemoteModified = remoteTs;
-        lastRemoteMd5 = remoteMd5;
         syncNote.textContent = `Updated from Drive at ${new Date().toLocaleTimeString()}`;
         setStatus("Pulled latest changes from Drive.");
         updatePreview();
@@ -670,21 +481,10 @@
   }
 
   async function refreshList() {
-    try {
-      setStatus("Listing files…");
-      const files = await listStorypadFiles();
-      listBody.innerHTML = files.map(f => {
-        const when = new Date(f.modifiedTime).toLocaleString();
-        const openHere = `<button data-open="${f.id}">Open here</button>`;
-        const link = `https://drive.google.com/file/d/${f.id}/view`;
-        return `<tr><td>${escapeHtml(f.name)}</td><td>${when}</td><td>${openHere} <a href="${link}" target="_blank" rel="noreferrer">Drive</a></td></tr>`;
-      }).join("");
-      listBody.querySelectorAll("button[data-open]").forEach(btn => {
-        btn.addEventListener("click", () => loadFile(btn.getAttribute("data-open")));
-      });
-      setStatus("Ready.");
-    } catch (e) { console.error(e); setStatus("List failed. See console."); }
+    try { setStatus("Listing files…"); const files = await listStorypadFiles(); listBody.innerHTML = files.map(f => { const when = new Date(f.modifiedTime).toLocaleString(); const openHere = `<button data-open="${f.id}">Open here</button>`; const link = `https://drive.google.com/file/d/${f.id}/view`; return `<tr><td>${escapeHtml(f.name)}</td><td>${when}</td><td>${openHere} <a href="${link}" target="_blank" rel="noreferrer">Drive</a></td></tr>`; }).join(""); listBody.querySelectorAll("button[data-open]").forEach(btn => { btn.addEventListener("click", () => loadFile(btn.getAttribute("data-open"))); }); setStatus("Ready."); } catch (e) { console.error(e); setStatus("List failed. See console."); }
   }
+
+  function escapeHtml(str){ return String(str).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'", '&#039;'); }
 </script>
 </body>
 </html>
