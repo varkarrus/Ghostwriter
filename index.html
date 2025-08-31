@@ -87,6 +87,12 @@
     #meta-body .row { display:grid; grid-template-columns: 1fr; gap: 6px; }
     #meta-body label { font-size: 12px; color: #333; }
     #meta-body textarea { width: 100%; min-height: 100px; max-height: 45vh; padding: 8px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    #meta-body input[type="password"], #meta-body select { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 8px; font: 13px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    #meta-body input[type="password"] { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    #meta-body button { padding: 10px 12px; border: 1px solid var(--line); background: #fff; border-radius: 8px; cursor: pointer; font: 13px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; font-weight: 600; }
+    #meta-body button:hover:not(:disabled) { background: var(--muted); }
+    #meta-body button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #meta-body button.generating { background: #f0f8ff; border-color: #4a90e2; }
     #next-enable-wrap { display:flex; align-items:center; justify-content:flex-end; gap: 8px; }
 
     /* Panel footer */
@@ -195,9 +201,31 @@
         <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="next-enabled" /> Enable</label>
       </div>
     </div>
+    <div class="row">
+      <label for="openrouter-key">OpenRouter API Key</label>
+      <input type="password" id="openrouter-key" placeholder="sk-or-v1-..." title="Get your API key from https://openrouter.ai/" />
+      <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="remember-key" /> Remember API key</label>
+      </div>
+    </div>
+    <div class="row">
+      <label for="ai-model">AI Model</label>
+      <select id="ai-model" title="Choose the AI model for generation">
+        <option value="">Select a model...</option>
+        <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+        <option value="anthropic/claude-3-haiku">Claude 3 Haiku</option>
+        <option value="openai/gpt-4o">GPT-4o</option>
+        <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
+        <option value="meta-llama/llama-3.1-70b-instruct">Llama 3.1 70B</option>
+        <option value="meta-llama/llama-3.1-8b-instruct">Llama 3.1 8B</option>
+      </select>
+    </div>
+    <div class="row">
+      <button id="ai-generate" type="button" disabled title="Generate AI content (Ctrl/⌘+G)">Generate with AI</button>
+    </div>
   </div>
   <div id="meta-foot">
-    <div>Changes autosave with content. <span class="pill">Alt+M</span> toggles.</div>
+    <div>Changes autosave with content. <span class="pill">Alt+M</span> toggles. <span class="pill">Ctrl/⌘+G</span> generates AI.</div>
     <div id="meta-hint" class="pill" style="background:#fff;border:1px solid var(--line)">Drive‑synced</div>
   </div>
 </aside>
@@ -207,10 +235,13 @@
   //  Configuration
   // =========================
   const CLIENT_ID = "389780383024-03s13biqo3n1hvdv2mn8jb2fcvc17ks3.apps.googleusercontent.com"; // OAuth 2.0 Web client ID (public)
-  const SCOPE = "https://www.googleapis.com/auth/drive.file"; // narrow Drive scope
+  const SCOPE = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata"; // Drive scope + app data
 
   const DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files";
   const DRIVE_FILES_URL  = "https://www.googleapis.com/drive/v3/files";
+  
+  // AI Settings
+  const AI_SETTINGS_FILENAME = "ghostwriter-ai-settings.json";
 
   // Autosave + polling
   const AUTOSAVE_DELAY = 1200;  // ms after last keystroke
@@ -224,7 +255,10 @@
   const DEFAULT_META = {
     ai_pre_prompt: "",
     next_instructions: "",
-    next_instructions_enabled: false
+    next_instructions_enabled: false,
+    openrouter_key: "",
+    remember_key: false,
+    ai_model: ""
   };
 
   // =========================
@@ -262,6 +296,10 @@
   const aiPreInput   = document.getElementById("ai-pre");
   const nextInstInput= document.getElementById("next-inst");
   const nextEnabled  = document.getElementById("next-enabled");
+  const openrouterKey = document.getElementById("openrouter-key");
+  const rememberKey  = document.getElementById("remember-key");
+  const aiModel      = document.getElementById("ai-model");
+  const aiGenerate   = document.getElementById("ai-generate");
 
   // =========================
   //  Auth & state
@@ -276,6 +314,11 @@
   let dirty = false;           // local edits (editor or metadata) since last save
   let lastInputTs = 0;         // timestamp of last edit
   let lastRemoteModified = 0;  // ms
+  
+  // AI Settings state
+  let aiSettingsFileId = null; // ID of the AI settings file in appdata folder
+  let aiSettingsLoaded = false; // whether we've attempted to load AI settings
+  let saveAISettingsTimer = null; // timer for delayed AI settings save
 
   function setStatus(msg) { statusEl.textContent = msg; }
   function setSaveDot(state) {
@@ -311,12 +354,14 @@
           accessToken = resp.access_token;
           setStatus("Signed in.");
           setSignedInUI(true);
+          loadAISettings(); // Load saved AI settings after authentication
           const preset = getQueryFileId();
           if (preset) { fileIdInput.value = preset; loadFile(preset); }
         }
       });
       wireEvents();
       setStatus("Ready. Sign in to begin.");
+      updateGenerateButton(); // Initialize AI button state
     }).catch(err => { console.error(err); setStatus("Failed to initialize Google Identity Services."); });
   });
 
@@ -336,6 +381,13 @@
     signoutBtn.addEventListener("click", () => {
       if (accessToken) {
         stopPolling();
+        // Clear AI settings state on signout
+        aiSettingsLoaded = false;
+        aiSettingsFileId = null;
+        if (!rememberKey.checked) {
+          openrouterKey.value = "";
+        }
+        updateGenerateButton();
         google.accounts.oauth2.revoke(accessToken, () => { accessToken = null; setSignedInUI(false); setActiveFile(null, null); setStatus("Signed out."); });
       }
     });
@@ -353,6 +405,17 @@
     aiPreInput.addEventListener("input", () => { markDirty(); });
     nextInstInput.addEventListener("input", () => { markDirty(); });
     nextEnabled.addEventListener("change", () => { markDirty(); });
+    openrouterKey.addEventListener("input", () => { 
+      markDirty(); 
+      updateGenerateButton(); 
+      // Save API key after user stops typing (only if remember is checked)
+      if (rememberKey.checked) {
+        clearTimeout(saveAISettingsTimer);
+        saveAISettingsTimer = setTimeout(() => saveAISettings(), 2000);
+      }
+    });
+    rememberKey.addEventListener("change", () => { markDirty(); saveAISettings(); });
+    aiModel.addEventListener("change", () => { markDirty(); updateGenerateButton(); saveAISettings(); });
 
     // Drawer open/close
     const toggle = () => openMeta(metaPanel.getAttribute('data-open') !== '1');
@@ -372,6 +435,14 @@
       if (primary && /^[1-6]$/.test(e.key)) { e.preventDefault(); toggleHeading(parseInt(e.key,10)); headingSel.value = e.key; return; }
       // Alt+M toggles metadata drawer
       if ((e.altKey || e.metaKey && e.shiftKey) && e.key.toLowerCase() === 'm') { e.preventDefault(); const wantOpen = metaPanel.getAttribute('data-open') !== '1'; openMeta(wantOpen); return; }
+      // Ctrl/Cmd+G generates AI content (if AI panel is open and configured)
+      if (primary && e.key.toLowerCase() === 'g') { 
+        if (metaPanel.getAttribute('data-open') === '1' && !aiGenerate.disabled) {
+          e.preventDefault(); 
+          generateAIContent(); 
+        }
+        return; 
+      }
       if (e.key === 'Escape') { if (metaPanel.getAttribute('data-open') === '1') { e.preventDefault(); openMeta(false); } }
       if (e.key === "Tab") {
         const { start, end } = getSelection(editor);
@@ -393,6 +464,9 @@
 
     // Save button in drawer
     metaSaveNow.addEventListener('click', () => flushSave());
+
+    // AI Generate button
+    aiGenerate.addEventListener('click', () => generateAIContent());
 
     window.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave({ silent:true }); });
     window.addEventListener("beforeunload", () => { flushSave({ silent:true }); });
@@ -418,13 +492,20 @@
     return {
       ai_pre_prompt: aiPreInput.value || "",
       next_instructions: nextInstInput.value || "",
-      next_instructions_enabled: !!nextEnabled.checked
+      next_instructions_enabled: !!nextEnabled.checked,
+      openrouter_key: rememberKey.checked ? (openrouterKey.value || "") : "",
+      remember_key: !!rememberKey.checked,
+      ai_model: aiModel.value || ""
     };
   }
   function writeMetaToUI(meta){
     aiPreInput.value = meta.ai_pre_prompt || "";
     nextInstInput.value = meta.next_instructions || "";
     nextEnabled.checked = !!meta.next_instructions_enabled;
+    openrouterKey.value = meta.openrouter_key || "";
+    rememberKey.checked = !!meta.remember_key;
+    aiModel.value = meta.ai_model || "";
+    updateGenerateButton();
   }
 
   function buildFileText(meta, content){
@@ -486,6 +567,254 @@
   function renderMarkdown(md){ const lines = md.replace(/\r\n/g,'\n').split('\n'); let html = ''; let inList = false; const flushList = () => { if (inList) { html += '</ul>'; inList = false; } }; for (let i=0;i<lines.length;i++){ const line = lines[i]; const h = line.match(/^(#{1,6})\s+(.*)$/); if (h){ flushList(); const lvl = h[1].length; const text = h[2]; html += `<h${lvl}>${applyInline(text)}</h${lvl}>`; continue; } const b = line.match(/^\s*-\s+(.*)$/); if (b){ if (!inList){ html += '<ul>'; inList = true; } html += `<li>${applyInline(b[1])}</li>`; continue; } if (/^\s*$/.test(line)) { flushList(); html += '<br />'; continue; } flushList(); html += `<p>${applyInline(line)}</p>`; } flushList(); return sanitizeHTML(html); }
   function sanitizeHTML(html){ const allowed = new Set(['H1','H2','H3','H4','H5','H6','P','STRONG','EM','U','UL','LI','BR']); const tmp = document.createElement('div'); tmp.innerHTML = html; (function walk(node){ const children = Array.from(node.childNodes); for (const child of children){ if (child.nodeType === 1){ if (!allowed.has(child.tagName)){ while (child.firstChild) node.insertBefore(child.firstChild, child); node.removeChild(child); continue; } const attrs = Array.from(child.attributes); for (const a of attrs) child.removeAttribute(a.name); walk(child); } } })(tmp); return tmp.innerHTML; }
   function updatePreview(){ previewEl.innerHTML = renderMarkdown(editor.value || ''); }
+
+  // =========================
+  //  AI Helper Functions
+  // =========================
+  function updateGenerateButton() {
+    const hasKey = openrouterKey.value.trim().length > 0;
+    const hasModel = aiModel.value.trim().length > 0;
+    aiGenerate.disabled = !hasKey || !hasModel;
+  }
+
+  async function generateAIContent() {
+    if (!openrouterKey.value.trim() || !aiModel.value.trim()) {
+      setStatus("Please enter OpenRouter API key and select a model.");
+      return;
+    }
+
+    try {
+      setStatus("Generating AI content...");
+      aiGenerate.disabled = true;
+      aiGenerate.textContent = "Generating...";
+      aiGenerate.classList.add("generating");
+
+      // Get the current editor content
+      const currentContent = editor.value || "";
+      
+      // Build the prompt
+      let prompt = "";
+      if (aiPreInput.value.trim()) {
+        prompt += `[${aiPreInput.value.trim()}]\n\n`;
+      }
+      prompt += currentContent;
+      
+      // Add next instructions if enabled - append to most recent complete paragraph
+      if (nextEnabled.checked && nextInstInput.value.trim()) {
+        // Find paragraphs (separated by double newlines or end of text)
+        const paragraphs = currentContent.split(/\n\s*\n/).filter(p => p.trim());
+        if (paragraphs.length > 0) {
+          // Check if the last paragraph looks complete (ends with punctuation)
+          const lastParagraph = paragraphs[paragraphs.length - 1].trim();
+          if (lastParagraph && /[.!?]$/.test(lastParagraph)) {
+            prompt += `\n\n[${nextInstInput.value.trim()}]`;
+          } else {
+            // If no complete paragraph, just add instructions at the end
+            prompt += `\n\n[${nextInstInput.value.trim()}]`;
+          }
+        } else {
+          // No paragraphs yet, add instructions
+          prompt += `\n\n[${nextInstInput.value.trim()}]`;
+        }
+      }
+
+      // Call OpenRouter API
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${openrouterKey.value.trim()}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": window.location.origin,
+          "X-Title": "Ghostwriter"
+        },
+        body: JSON.stringify({
+          model: aiModel.value,
+          messages: [
+            {
+              role: "user",
+              content: prompt
+            }
+          ],
+          max_tokens: 1000,
+          temperature: 0.7
+        })
+      });
+
+      if (!response.ok) {
+        let errorMessage = `OpenRouter API error: ${response.status} ${response.statusText}`;
+        const errorText = await response.text();
+        
+        // Provide helpful error messages for common issues
+        if (response.status === 401) {
+          errorMessage = "Invalid API key. Please check your OpenRouter API key.";
+        } else if (response.status === 429) {
+          errorMessage = "Rate limit exceeded. Please wait a moment and try again.";
+        } else if (response.status === 402) {
+          errorMessage = "Insufficient credits. Please check your OpenRouter account balance.";
+        } else if (errorText) {
+          try {
+            const errorData = JSON.parse(errorText);
+            if (errorData.error?.message) {
+              errorMessage += `: ${errorData.error.message}`;
+            }
+          } catch {
+            errorMessage += `: ${errorText}`;
+          }
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      const generatedText = data.choices?.[0]?.message?.content?.trim();
+
+      if (!generatedText) {
+        throw new Error("No content generated from AI model.");
+      }
+
+      // Insert the generated content at the cursor position or end of editor
+      const { start, end } = getSelection(editor);
+      const before = editor.value.slice(0, start);
+      const after = editor.value.slice(end);
+      
+      // Add appropriate spacing
+      let insertText = generatedText;
+      if (before && !before.endsWith('\n\n')) {
+        insertText = '\n\n' + insertText;
+      }
+      
+      const newValue = before + insertText + after;
+      const newCursorPos = start + insertText.length;
+      
+      applyChange(newValue, newCursorPos, newCursorPos);
+      updatePreview();
+      
+      setStatus("AI content generated successfully.");
+    } catch (error) {
+      console.error("AI generation error:", error);
+      setStatus(`AI generation failed: ${error.message}`);
+    } finally {
+      aiGenerate.disabled = false;
+      aiGenerate.textContent = "Generate with AI";
+      aiGenerate.classList.remove("generating");
+      updateGenerateButton();
+    }
+  }
+
+  // =========================
+  //  AI Settings Persistence (Google Drive AppData)
+  // =========================
+  async function findAISettingsFile() {
+    try {
+      const url = new URL(DRIVE_FILES_URL);
+      url.searchParams.set("q", `name='${AI_SETTINGS_FILENAME}' and parents in 'appdata'`);
+      url.searchParams.set("spaces", "appdata");
+      url.searchParams.set("fields", "files(id,name)");
+      
+      const res = await fetch(url.toString(), { headers: authHeader() });
+      if (res.status === 401) { await refreshToken(); return findAISettingsFile(); }
+      if (!res.ok) throw new Error(`Find AI settings failed: ${res.status}`);
+      
+      const { files } = await res.json();
+      return files && files.length > 0 ? files[0].id : null;
+    } catch (e) {
+      console.warn("Failed to find AI settings file:", e);
+      return null;
+    }
+  }
+
+  async function loadAISettings() {
+    if (!accessToken || aiSettingsLoaded) return;
+    
+    try {
+      aiSettingsFileId = await findAISettingsFile();
+      if (!aiSettingsFileId) {
+        aiSettingsLoaded = true;
+        return; // No settings file exists yet
+      }
+
+      const res = await fetch(`${DRIVE_FILES_URL}/${aiSettingsFileId}?alt=media`, { headers: authHeader() });
+      if (res.status === 401) { await refreshToken(); return loadAISettings(); }
+      if (!res.ok) throw new Error(`Load AI settings failed: ${res.status}`);
+      
+      const settingsText = await res.text();
+      const settings = JSON.parse(settingsText);
+      
+      // Apply settings to UI (but only if remember_key is true for API key)
+      if (settings.ai_model) {
+        aiModel.value = settings.ai_model;
+      }
+      if (settings.remember_key && settings.openrouter_key) {
+        openrouterKey.value = settings.openrouter_key;
+        rememberKey.checked = true;
+      } else {
+        rememberKey.checked = false;
+      }
+      
+      updateGenerateButton();
+      aiSettingsLoaded = true;
+      console.log("AI settings loaded from Drive");
+    } catch (e) {
+      console.warn("Failed to load AI settings:", e);
+      aiSettingsLoaded = true;
+    }
+  }
+
+  async function saveAISettings() {
+    if (!accessToken) return;
+    
+    try {
+      const settings = {
+        ai_model: aiModel.value || "",
+        remember_key: !!rememberKey.checked,
+        openrouter_key: rememberKey.checked ? (openrouterKey.value || "") : "",
+        last_updated: new Date().toISOString()
+      };
+      
+      const settingsJson = JSON.stringify(settings, null, 2);
+      
+      if (aiSettingsFileId) {
+        // Update existing file
+        const res = await fetch(`${DRIVE_UPLOAD_URL}/${aiSettingsFileId}?uploadType=media`, {
+          method: "PATCH",
+          headers: { ...authHeader(), "Content-Type": "application/json; charset=UTF-8" },
+          body: settingsJson
+        });
+        if (res.status === 401) { await refreshToken(); return saveAISettings(); }
+        if (!res.ok) throw new Error(`Update AI settings failed: ${res.status}`);
+      } else {
+        // Create new file in appdata folder
+        const boundary = "-------AISettings-" + Math.random().toString(36).slice(2);
+        const metadata = { 
+          name: AI_SETTINGS_FILENAME, 
+          parents: ["appdata"],
+          mimeType: "application/json"
+        };
+        const body = `--${boundary}\r\n` +
+          `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+          JSON.stringify(metadata) + `\r\n` +
+          `--${boundary}\r\n` +
+          `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+          settingsJson + `\r\n` +
+          `--${boundary}--`;
+          
+        const res = await fetch(`${DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id`, {
+          method: "POST",
+          headers: { ...authHeader(), "Content-Type": `multipart/related; boundary=${boundary}` },
+          body
+        });
+        if (res.status === 401) { await refreshToken(); return saveAISettings(); }
+        if (!res.ok) throw new Error(`Create AI settings failed: ${res.status}`);
+        
+        const result = await res.json();
+        aiSettingsFileId = result.id;
+      }
+      
+      console.log("AI settings saved to Drive");
+    } catch (e) {
+      console.warn("Failed to save AI settings:", e);
+    }
+  }
 
   // =========================
   //  Drive helpers (fetch)
