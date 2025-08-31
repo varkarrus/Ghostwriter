@@ -31,7 +31,7 @@
     #list-panel tr:hover { background: #fafafa; }
 
     /* Main editor/preview area */
-    main.main { display: grid; grid-template-columns: 1fr; height: 100%; min-height: 0; max-width: 100%; margin: 0 auto; }
+    main.main { display: grid; grid-template-columns: 1fr; height: 100%; min-height: 0; width: 100%; margin: 0 auto; }
     #editor-wrap, #preview { min-height: 0; }
     #editor { 
       width: 100%; height: 100%; padding: 16px; border: none; outline: none; resize: none; 
@@ -43,15 +43,12 @@
     /* Responsive text area constraints */
     @media (min-width: 768px) {
       main.main { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
-      #editor { max-width: calc(100vw - 40px); }
     }
     @media (min-width: 1200px) {
       main.main { max-width: 1600px; padding: 0 40px; }
-      #editor { max-width: calc(100vw - 80px); }
     }
     @media (min-width: 1400px) {
       main.main { max-width: 1800px; padding: 0 60px; }
-      #editor { max-width: calc(100vw - 120px); }
     }
 
     /* Split / Preview-only modes */
