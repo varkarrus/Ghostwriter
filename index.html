@@ -46,8 +46,12 @@
       #editor { max-width: calc(100vw - 40px); }
     }
     @media (min-width: 1200px) {
-      main.main { max-width: 1400px; padding: 0 40px; }
+      main.main { max-width: 1600px; padding: 0 40px; }
       #editor { max-width: calc(100vw - 80px); }
+    }
+    @media (min-width: 1400px) {
+      main.main { max-width: 1800px; padding: 0 60px; }
+      #editor { max-width: calc(100vw - 120px); }
     }
 
     /* Split / Preview-only modes */
@@ -104,10 +108,10 @@
     }
     .meta-tab-btn {
       flex: 1;
-      padding: 8px 12px;
+      padding: 6px 10px;
       border: none;
       background: transparent;
-      font: 12px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      font: 11px/1.3 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
       font-weight: 500;
       color: #666;
       cursor: pointer;
@@ -255,6 +259,7 @@
         <button id="bold-btn" aria-label="Bold (Ctrl/⌘+B)"><strong>B</strong></button>
         <button id="italic-btn" aria-label="Italic (Ctrl/⌘+I)"><em>I</em></button>
         <button id="underline-btn" aria-label="Underline (Ctrl/⌘+U)"><u>U</u></button>
+        <button id="hidden-btn" aria-label="Hidden text (Ctrl/⌘+H)">[H]</button>
         <button id="bullet-btn" aria-label="Bulleted list (Ctrl/⌘+Shift+8)">• List</button>
         <button id="header-btn" aria-label="Add header to selection" class="pill" style="background:#fff;border:1px solid var(--line)">Hdr</button>
         <select id="heading-select" aria-label="Heading">
@@ -343,15 +348,10 @@
       </div>
       <div class="row">
         <label for="ai-model">AI Model</label>
-        <select id="ai-model" title="Choose the AI model for generation">
-          <option value="">Select a model...</option>
-          <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
-          <option value="anthropic/claude-3-haiku">Claude 3 Haiku</option>
-          <option value="openai/gpt-4o">GPT-4o</option>
-          <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
-          <option value="meta-llama/llama-3.1-70b-instruct">Llama 3.1 70B</option>
-          <option value="meta-llama/llama-3.1-8b-instruct">Llama 3.1 8B</option>
-        </select>
+        <div style="position: relative;">
+          <input type="text" id="ai-model" placeholder="Search for a model..." title="Search and select AI model" />
+          <div id="model-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid var(--line); border-top: none; border-radius: 0 0 8px 8px; max-height: 200px; overflow-y: auto; z-index: 1000;"></div>
+        </div>
         <button id="refresh-models-btn" type="button" style="margin-top:6px;padding:6px 12px;">↻ Refresh Models</button>
       </div>
       <div class="row">
@@ -459,6 +459,7 @@
   const boldBtn      = document.getElementById("bold-btn");
   const italicBtn    = document.getElementById("italic-btn");
   const underlineBtn = document.getElementById("underline-btn");
+  const hiddenBtn    = document.getElementById("hidden-btn");
   const bulletBtn    = document.getElementById("bullet-btn");
   const headerBtn    = document.getElementById("header-btn");
   const headingSel   = document.getElementById("heading-select");
@@ -479,6 +480,7 @@
   const openrouterKey = document.getElementById("openrouter-key");
   const rememberKey  = document.getElementById("remember-key");
   const aiModel      = document.getElementById("ai-model");
+  const modelDropdown = document.getElementById("model-dropdown");
   const aiGenerate   = document.getElementById("ai-generate");
   const fixedGenerateBtn = document.getElementById("fixed-generate-btn");
   const cancelGenerateBtn = document.getElementById("cancel-generate-btn");
@@ -514,6 +516,9 @@
   
   // Current active tab
   let activeTab = 'story';
+  
+  // Available models from OpenRouter
+  let availableModels = [];
 
   function setStatus(msg) { statusEl.textContent = msg; }
   function setSaveDot(state) {
@@ -532,7 +537,7 @@
     signoutBtn.disabled = !signedIn;
     listBtn.disabled = !signedIn;
     fileIdInput.disabled = !signedIn;
-    [boldBtn, italicBtn, underlineBtn, bulletBtn, headerBtn, headingSel, togglePreviewBtn, toggleSplitBtn, aiPreInput, nextInstInput, nextEnabled, metaClose, metaSaveNow, fixedGenerateBtn].forEach(el => el.disabled = !signedIn);
+    [boldBtn, italicBtn, underlineBtn, hiddenBtn, bulletBtn, headerBtn, headingSel, togglePreviewBtn, toggleSplitBtn, aiPreInput, nextInstInput, nextEnabled, metaClose, metaSaveNow, fixedGenerateBtn].forEach(el => el.disabled = !signedIn);
     metaTab.setAttribute('aria-disabled', String(!signedIn));
     if (!signedIn) openMeta(false);
   }
@@ -547,6 +552,7 @@
         callback: (resp) => {
           if (resp.error) { console.error(resp); setStatus("Auth error."); return; }
           accessToken = resp.access_token;
+          setCookie('ghostwriter_auth', accessToken, 1); // Save for 1 day
           setStatus("Signed in.");
           setSignedInUI(true);
           loadAISettings(); // Load saved AI settings after authentication
@@ -555,7 +561,20 @@
         }
       });
       wireEvents();
-      setStatus("Ready. Sign in to begin.");
+      
+      // Check for saved authentication
+      const savedAuth = getCookie('ghostwriter_auth');
+      if (savedAuth) {
+        accessToken = savedAuth;
+        setStatus("Restoring session...");
+        setSignedInUI(true);
+        loadAISettings();
+        const preset = getQueryFileId();
+        if (preset) { fileIdInput.value = preset; loadFile(preset); }
+      } else {
+        setStatus("Ready. Sign in to begin.");
+      }
+      
       updateGenerateButton(); // Initialize AI button state
     }).catch(err => { console.error(err); setStatus("Failed to initialize Google Identity Services."); });
   });
@@ -571,6 +590,28 @@
     };
   }
 
+  // Cookie management for auth persistence
+  function setCookie(name, value, days = 30) {
+    const expires = new Date();
+    expires.setTime(expires.getTime() + (days * 24 * 60 * 60 * 1000));
+    document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=/;SameSite=Lax`;
+  }
+
+  function getCookie(name) {
+    const nameEQ = name + "=";
+    const ca = document.cookie.split(';');
+    for (let i = 0; i < ca.length; i++) {
+      let c = ca[i];
+      while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+      if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
+    }
+    return null;
+  }
+
+  function deleteCookie(name) {
+    document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:01 GMT;path=/`;
+  }
+
   function wireEvents() {
     document.getElementById("auth-btn").addEventListener("click", () => { setStatus("Opening Google sign-in…"); tokenClient.requestAccessToken({ prompt: "consent" }); });
     signoutBtn.addEventListener("click", () => {
@@ -583,6 +624,7 @@
           openrouterKey.value = "";
         }
         updateGenerateButton();
+        deleteCookie('ghostwriter_auth'); // Clear saved auth
         google.accounts.oauth2.revoke(accessToken, () => { accessToken = null; setSignedInUI(false); setActiveFile(null, null); setStatus("Signed out."); });
       }
     });
@@ -610,6 +652,22 @@
       }
     });
     rememberKey.addEventListener("change", () => { markDirty(); saveAISettings(); });
+    
+    // AI Model search functionality
+    aiModel.addEventListener("input", () => { 
+      filterModels(aiModel.value); 
+    });
+    aiModel.addEventListener("focus", () => {
+      if (aiModel.value.trim()) {
+        filterModels(aiModel.value);
+      }
+    });
+    aiModel.addEventListener("blur", () => {
+      // Hide dropdown after a delay to allow clicking on items
+      setTimeout(() => {
+        modelDropdown.style.display = 'none';
+      }, 200);
+    });
     aiModel.addEventListener("change", () => { markDirty(); updateGenerateButton(); saveAISettings(); });
 
     // Drawer open/close
@@ -626,6 +684,7 @@
       if (primary && e.key.toLowerCase() === "b") { e.preventDefault(); toggleBold(); return; }
       if (primary && e.key.toLowerCase() === "i") { e.preventDefault(); toggleItalic(); return; }
       if (primary && e.key.toLowerCase() === "u") { e.preventDefault(); toggleUnderline(); return; }
+      if (primary && e.key.toLowerCase() === "h") { e.preventDefault(); toggleHidden(); return; }
       if (primary && e.shiftKey && e.key === "8") { e.preventDefault(); toggleBulleted(); return; }
       if (primary && /^[1-6]$/.test(e.key)) { e.preventDefault(); toggleHeading(parseInt(e.key,10)); headingSel.value = e.key; return; }
       // Alt+M toggles metadata drawer
@@ -650,6 +709,7 @@
     document.getElementById("bold-btn").addEventListener("click", () => { toggleBold(); updatePreview(); });
     document.getElementById("italic-btn").addEventListener("click", () => { toggleItalic(); updatePreview(); });
     document.getElementById("underline-btn").addEventListener("click", () => { toggleUnderline(); updatePreview(); });
+    document.getElementById("hidden-btn").addEventListener("click", () => { toggleHidden(); updatePreview(); });
     document.getElementById("bullet-btn").addEventListener("click", () => { toggleBulleted(); updatePreview(); });
     document.getElementById("header-btn").addEventListener("click", () => { toggleHeading(1); headingSel.value = "1"; updatePreview(); });
     headingSel.addEventListener("change", () => { const lvl = parseInt(headingSel.value, 10); if (!isNaN(lvl)) { toggleHeading(lvl); updatePreview(); } });
@@ -664,10 +724,19 @@
     // AI Generate button
     aiGenerate.addEventListener('click', () => generateAIContent());
 
-    // Tab switching
-    document.querySelectorAll('.meta-tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => switchTab(btn.dataset.tab));
-    });
+    // Tab switching - with retry to ensure DOM is ready
+    function bindTabEvents() {
+      const tabBtns = document.querySelectorAll('.meta-tab-btn');
+      if (tabBtns.length > 0) {
+        tabBtns.forEach(btn => {
+          btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+        });
+      } else {
+        // Retry after a short delay if buttons not found
+        setTimeout(bindTabEvents, 100);
+      }
+    }
+    bindTabEvents();
 
     // Fixed generate button
     fixedGenerateBtn.addEventListener('click', () => generateAIContent());
@@ -802,6 +871,7 @@
   function toggleBold(){ wrapOrUnwrapSelection("**", "**", { altL:["__"], altR:["__"] }); }
   function toggleItalic(){ wrapOrUnwrapSelection("*", "*", { altL:["_"], altR:["_"] }); }
   function toggleUnderline(){ wrapOrUnwrapSelection("<u>", "</u>"); }
+  function toggleHidden(){ wrapOrUnwrapSelection("[", "]"); }
 
   function getSelectedLineRange(text, start, end){ const lineStart = text.lastIndexOf("\n", start - 1) + 1; let lineEnd = text.indexOf("\n", end); if (lineEnd === -1) lineEnd = text.length; return { start: lineStart, end: lineEnd, text: text.slice(lineStart, lineEnd) }; }
   function toggleBulleted(){ const { start, end, value } = getSelection(editor); const range = getSelectedLineRange(value, start, end); const lines = value.slice(range.start, range.end).split("\n"); const allBulleted = lines.every(l => /^\s*-\s/.test(l) || l.trim() === ""); const changed = lines.map(l => { if (l.trim() === "") return l; if (allBulleted) return l.replace(/^\s*-\s?/, ""); return l.replace(/^\s*/, "$&- "); }).join("\n"); const nv = value.slice(0, range.start) + changed + value.slice(range.end); const delta = changed.length - (range.end - range.start); applyChange(nv, start + (start - range.start), end + delta - (range.end - end)); }
@@ -813,8 +883,8 @@
   //  Markdown renderer (safe-ish)
   // =========================
   function escapeHtml(str){ return String(str).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
-  function applyInline(md){ let s = escapeHtml(md); s = s.replace(/\*\*([^\n*]+)\*\*/g, '<strong>$1</strong>'); s = s.replace(/(^|[^*])\*([^\n*]+)\*(?!\*)/g, '$1<em>$2</em>'); s = s.replace(/&lt;u&gt;([\s\S]*?)&lt;\/u&gt;/g, '<u>$1</u>'); return s; }
-  function renderMarkdown(md){ const lines = md.replace(/\r\n/g,'\n').split('\n'); let html = ''; let inList = false; const flushList = () => { if (inList) { html += '</ul>'; inList = false; } }; for (let i=0;i<lines.length;i++){ const line = lines[i]; const h = line.match(/^(#{1,6})\s+(.*)$/); if (h){ flushList(); const lvl = h[1].length; const text = h[2]; html += `<h${lvl}>${applyInline(text)}</h${lvl}>`; continue; } const b = line.match(/^\s*-\s+(.*)$/); if (b){ if (!inList){ html += '<ul>'; inList = true; } html += `<li>${applyInline(b[1])}</li>`; continue; } if (/^\s*$/.test(line)) { flushList(); html += '<br />'; continue; } flushList(); html += `<p>${applyInline(line)}</p>`; } flushList(); return sanitizeHTML(html); }
+  function applyInline(md){ let s = escapeHtml(md); s = s.replace(/\[([^\]]*)\]/g, ''); s = s.replace(/\*\*([^\n*]+)\*\*/g, '<strong>$1</strong>'); s = s.replace(/(^|[^*])\*([^\n*]+)\*(?!\*)/g, '$1<em>$2</em>'); s = s.replace(/&lt;u&gt;([\s\S]*?)&lt;\/u&gt;/g, '<u>$1</u>'); return s; }
+  function renderMarkdown(md){ const lines = md.replace(/\r\n/g,'\n').split('\n'); let html = ''; let inList = false; const flushList = () => { if (inList) { html += '</ul>'; inList = false; } }; let emptyLineCount = 0; for (let i=0;i<lines.length;i++){ const line = lines[i]; const h = line.match(/^(#{1,6})\s+(.*)$/); if (h){ flushList(); const lvl = h[1].length; const text = h[2]; html += `<h${lvl}>${applyInline(text)}</h${lvl}>`; emptyLineCount = 0; continue; } const b = line.match(/^\s*-\s+(.*)$/); if (b){ if (!inList){ html += '<ul>'; inList = true; } html += `<li>${applyInline(b[1])}</li>`; emptyLineCount = 0; continue; } if (/^\s*$/.test(line)) { emptyLineCount++; if (emptyLineCount >= 2) { flushList(); html += '<div style="margin-bottom: 0.75em;"></div>'; emptyLineCount = 0; } else if (emptyLineCount === 1) { flushList(); html += '<br />'; } continue; } flushList(); html += `<p>${applyInline(line)}</p>`; emptyLineCount = 0; } flushList(); return sanitizeHTML(html); }
   function sanitizeHTML(html){ const allowed = new Set(['H1','H2','H3','H4','H5','H6','P','STRONG','EM','U','UL','LI','BR']); const tmp = document.createElement('div'); tmp.innerHTML = html; (function walk(node){ const children = Array.from(node.childNodes); for (const child of children){ if (child.nodeType === 1){ if (!allowed.has(child.tagName)){ while (child.firstChild) node.insertBefore(child.firstChild, child); node.removeChild(child); continue; } const attrs = Array.from(child.attributes); for (const a of attrs) child.removeAttribute(a.name); walk(child); } } })(tmp); return tmp.innerHTML; }
   function updatePreview(){ previewEl.innerHTML = renderMarkdown(editor.value || ''); }
 
@@ -885,24 +955,51 @@
       const data = await response.json();
       const models = data.data || [];
       
-      // Clear existing options except the first one
-      aiModel.innerHTML = '<option value="">Select a model...</option>';
-      
-      // Add fetched models
-      models.forEach(model => {
-        const option = document.createElement('option');
-        option.value = model.id;
-        option.textContent = `${model.id} - $${(model.pricing?.prompt || 0).toFixed(6)}/1K tokens`;
-        aiModel.appendChild(option);
-      });
+      // Store models for search functionality
+      availableModels = models.map(model => ({
+        id: model.id,
+        name: model.id,
+        pricing: model.pricing?.prompt || 0,
+        displayText: `${model.id} - $${(model.pricing?.prompt || 0).toFixed(6)}/1K tokens`
+      }));
       
       setStatus("Models updated successfully.");
     } catch (error) {
       console.error("Failed to fetch models:", error);
       setStatus(`Failed to fetch models: ${error.message}`);
-    } finally {
-      refreshModelsBtn.disabled = false;
-      refreshModelsBtn.textContent = "↻ Refresh Models";
+    }
+  }
+
+  function filterModels(searchTerm) {
+    const filtered = availableModels.filter(model => 
+      model.id.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+    
+    modelDropdown.innerHTML = '';
+    
+    if (filtered.length > 0 && searchTerm.trim() !== '') {
+      modelDropdown.style.display = 'block';
+      filtered.slice(0, 10).forEach(model => { // Limit to 10 results
+        const item = document.createElement('div');
+        item.style.cssText = 'padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #eee; font-size: 13px;';
+        item.textContent = model.displayText;
+        item.addEventListener('click', () => {
+          aiModel.value = model.id;
+          modelDropdown.style.display = 'none';
+          updateGenerateButton();
+          markDirty();
+          saveAISettings();
+        });
+        item.addEventListener('mouseenter', () => {
+          item.style.backgroundColor = '#f5f5f5';
+        });
+        item.addEventListener('mouseleave', () => {
+          item.style.backgroundColor = 'white';
+        });
+        modelDropdown.appendChild(item);
+      });
+    } else {
+      modelDropdown.style.display = 'none';
     }
   }
 
