@@ -352,7 +352,6 @@
           <input type="text" id="ai-model" placeholder="Search for a model..." title="Search and select AI model" />
           <div id="model-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid var(--line); border-top: none; border-radius: 0 0 8px 8px; max-height: 200px; overflow-y: auto; z-index: 1000;"></div>
         </div>
-        <button id="refresh-models-btn" type="button" style="margin-top:6px;padding:6px 12px;">↻ Refresh Models</button>
       </div>
       <div class="row">
         <label for="max-tokens">Max Output Tokens</label>
@@ -484,7 +483,6 @@
 
   const fixedGenerateBtn = document.getElementById("fixed-generate-btn");
   const cancelGenerateBtn = document.getElementById("cancel-generate-btn");
-  const refreshModelsBtn = document.getElementById("refresh-models-btn");
   const maxTokensInput = document.getElementById("max-tokens");
   const temperatureInput = document.getElementById("temperature");
   const topPInput = document.getElementById("top-p");
@@ -784,8 +782,14 @@
     maxTokensInput.addEventListener('input', () => { updateCostEstimate(); markDirty(); });
     topKInput.addEventListener('input', () => { updateCostEstimate(); markDirty(); });
     
-    // Refresh models button
-    refreshModelsBtn.addEventListener('click', () => refreshAvailableModels());
+    // Auto-refresh models when API key changes
+    openrouterKey.addEventListener('input', () => { 
+      markDirty(); 
+      // Auto-fetch models if key looks valid (longer than 10 chars)
+      if (openrouterKey.value.trim().length > 10) {
+        refreshAvailableModels();
+      }
+    });
 
     window.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave({ silent:true }); });
     window.addEventListener("beforeunload", () => { flushSave({ silent:true }); });
@@ -1025,8 +1029,6 @@
     
     try {
       setStatus("Fetching available models...");
-      refreshModelsBtn.disabled = true;
-      refreshModelsBtn.textContent = "Loading...";
       
       const response = await fetch("https://openrouter.ai/api/v1/models", {
         headers: {
@@ -1042,12 +1044,16 @@
       const models = data.data || [];
       
       // Store models for search functionality
-      availableModels = models.map(model => ({
-        id: model.id,
-        name: model.id,
-        pricing: model.pricing?.prompt || 0,
-        displayText: `${model.id} - $${(model.pricing?.prompt || 0).toFixed(6)}/1K tokens`
-      }));
+      availableModels = models.map(model => {
+        const pricing = model.pricing?.prompt || 0;
+        const pricingNum = typeof pricing === 'number' ? pricing : parseFloat(pricing) || 0;
+        return {
+          id: model.id,
+          name: model.id,
+          pricing: pricingNum,
+          displayText: `${model.id} - $${pricingNum.toFixed(6)}/1K tokens`
+        };
+      });
       
       setStatus("Models updated successfully.");
     } catch (error) {
@@ -1140,17 +1146,42 @@
       // Get the current editor content
       const currentContent = editor.value || "";
       
+      // Apply max input length limit - keep only recent paragraphs if content is too long
+      let limitedContent = currentContent;
+      const maxInputLength = 8000; // Approximate character limit to stay under token limits
+      
+      if (currentContent.length > maxInputLength) {
+        const paragraphs = currentContent.split(/\n\s*\n/).filter(p => p.trim());
+        let totalLength = 0;
+        const recentParagraphs = [];
+        
+        // Work backwards from the end to include the most recent paragraphs
+        for (let i = paragraphs.length - 1; i >= 0; i--) {
+          const paragraph = paragraphs[i];
+          if (totalLength + paragraph.length > maxInputLength && recentParagraphs.length > 0) {
+            break;
+          }
+          recentParagraphs.unshift(paragraph);
+          totalLength += paragraph.length + 2; // +2 for paragraph separator
+        }
+        
+        limitedContent = recentParagraphs.join('\n\n');
+        if (recentParagraphs.length < paragraphs.length) {
+          setStatus(`Content truncated to recent ${recentParagraphs.length} paragraphs due to length limit.`);
+        }
+      }
+      
       // Build the prompt
       let prompt = "";
       if (aiPreInput.value.trim()) {
         prompt += `[${aiPreInput.value.trim()}]\n\n`;
       }
-      prompt += currentContent;
+      prompt += limitedContent;
       
       // Add next instructions if enabled - append to most recent complete paragraph
       if (nextEnabled.checked && nextInstInput.value.trim()) {
         // Find paragraphs (separated by double newlines or end of text)
-        const paragraphs = currentContent.split(/\n\s*\n/).filter(p => p.trim());
+        const paragraphs = limitedContent.split(/\n\s*\n/).filter(p => p.trim());
         if (paragraphs.length > 0) {
           // Check if the last paragraph looks complete (ends with punctuation)
           const lastParagraph = paragraphs[paragraphs.length - 1].trim();
