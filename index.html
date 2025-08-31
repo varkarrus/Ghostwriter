@@ -176,6 +176,8 @@
     @media (max-width: 480px) {
       :root { --meta-w: 92vw; }
       #meta-tab { top: auto; bottom: 18px; transform: translate(50%, 0); writing-mode: horizontal-tb; }
+      /* Move Generate button to bottom left on mobile to avoid covering settings button */
+      #fixed-generate-btn { left: 20px; right: auto; }
     }
 
     /* Fixed Generate Button */
@@ -300,7 +302,7 @@
 </div>
 
 <!-- Side tab and drawer -->
-<button id="meta-tab" aria-expanded="false" aria-controls="meta-panel" title="Metadata (Alt+M)">Metadata</button>
+<button id="meta-tab" aria-expanded="false" aria-controls="meta-panel" title="Settings (Alt+M)">Settings</button>
 <div id="meta-scrim" aria-hidden="true"></div>
 
 <!-- Fixed Generate Button -->
@@ -357,6 +359,10 @@
       <div class="row">
         <label for="max-tokens">Max Output Tokens</label>
         <input type="number" id="max-tokens" min="1" max="4000" value="1000" />
+      </div>
+      <div class="row">
+        <label for="max-input-tokens">Max Input Tokens</label>
+        <input type="number" id="max-input-tokens" min="1" max="32000" value="8000" />
       </div>
       <div class="row">
         <label for="temperature">Temperature</label>
@@ -435,6 +441,7 @@
     remember_key: false,
     ai_model: "",
     max_tokens: 1000,
+    max_input_tokens: 8000,
     temperature: 0.7,
     top_p: 1.0,
     top_k: 0
@@ -485,6 +492,7 @@
   const fixedGenerateBtn = document.getElementById("fixed-generate-btn");
   const cancelGenerateBtn = document.getElementById("cancel-generate-btn");
   const maxTokensInput = document.getElementById("max-tokens");
+  const maxInputTokensInput = document.getElementById("max-input-tokens");
   const temperatureInput = document.getElementById("temperature");
   const topPInput = document.getElementById("top-p");
   const topKInput = document.getElementById("top-k");
@@ -781,6 +789,7 @@
     
     // Other AI settings changes
     maxTokensInput.addEventListener('input', () => { updateCostEstimate(); markDirty(); });
+    maxInputTokensInput.addEventListener('input', () => { markDirty(); });
     topKInput.addEventListener('input', () => { updateCostEstimate(); markDirty(); });
     
     // Auto-refresh models when API key changes
@@ -834,6 +843,7 @@
       remember_key: !!rememberKey.checked,
       ai_model: aiModel.value || "",
       max_tokens: parseInt(maxTokensInput.value) || 1000,
+      max_input_tokens: parseInt(maxInputTokensInput.value) || 8000,
       temperature: parseFloat(temperatureInput.value) || 0.7,
       top_p: parseFloat(topPInput.value) || 1.0,
       top_k: parseInt(topKInput.value) || 0
@@ -847,6 +857,7 @@
     rememberKey.checked = !!meta.remember_key;
     aiModel.value = meta.ai_model || "";
     maxTokensInput.value = meta.max_tokens || 1000;
+    maxInputTokensInput.value = meta.max_input_tokens || 8000;
     temperatureInput.value = meta.temperature || 0.7;
     topPInput.value = meta.top_p || 1.0;
     topKInput.value = meta.top_k || 0;
@@ -1149,7 +1160,7 @@
       
       // Apply max input length limit - keep only recent paragraphs if content is too long
       let limitedContent = currentContent;
-      const maxInputLength = 8000; // Approximate character limit to stay under token limits
+      const maxInputLength = parseInt(maxInputTokensInput.value) || 8000; // Use user-configured limit
       
       if (currentContent.length > maxInputLength) {
         const paragraphs = currentContent.split(/\n\s*\n/).filter(p => p.trim());
@@ -1416,6 +1427,7 @@
   async function updateTextFile(fileId, text) { const res = await fetch(`${DRIVE_UPLOAD_URL}/${fileId}?uploadType=media&fields=id,name,modifiedTime,webViewLink`, { method: "PATCH", headers: { ...authHeader(), "Content-Type": "text/plain; charset=UTF-8" }, body: text || "" }); if (res.status === 401) { await refreshToken(); return updateTextFile(fileId, text); } if (!res.ok) throw new Error(`Update failed: ${res.status}`); return await res.json(); }
   async function downloadTextFile(fileId) { const res = await fetch(`${DRIVE_FILES_URL}/${fileId}?alt=media`, { headers: authHeader() }); if (res.status === 401) { await refreshToken(); return downloadTextFile(fileId); } if (!res.ok) throw new Error(`Download failed: ${res.status}`); return await res.text(); }
   async function getMeta(fileId) { const res = await fetch(`${DRIVE_FILES_URL}/${fileId}?fields=id,name,modifiedTime`, { headers: authHeader() }); if (res.status === 401) { await refreshToken(); return getMeta(fileId); } if (!res.ok) throw new Error(`Meta failed: ${res.status}`); return await res.json(); }
+  async function renameFile(fileId, newName) { const res = await fetch(`${DRIVE_FILES_URL}/${fileId}?fields=id,name,modifiedTime`, { method: "PATCH", headers: { ...authHeader(), "Content-Type": "application/json" }, body: JSON.stringify({ name: newName }) }); if (res.status === 401) { await refreshToken(); return renameFile(fileId, newName); } if (!res.ok) throw new Error(`Rename failed: ${res.status}`); return await res.json(); }
   async function listGhostwriterFiles() { const q = ["mimeType='text/plain'","appProperties has { key='Ghostwriter' and value='1' }"]; const url = new URL(DRIVE_FILES_URL); url.searchParams.set("q", q.join(" and ")); url.searchParams.set("orderBy", "modifiedTime desc"); url.searchParams.set("pageSize", "100"); url.searchParams.set("fields", "files(id,name,modifiedTime)"); const res = await fetch(url.toString(), { headers: authHeader() }); if (res.status === 401) { await refreshToken(); return listGhostwriterFiles(); } if (!res.ok) throw new Error(`List failed: ${res.status}`); const { files } = await res.json(); return files || []; }
   async function refreshToken(){ return new Promise((resolve) => { tokenClient.callback = () => resolve(); tokenClient.requestAccessToken({ prompt: "" }); }); }
 
@@ -1495,7 +1507,53 @@
   }
 
   async function refreshList() {
-    try { setStatus("Listing files…"); const files = await listGhostwriterFiles(); listBody.innerHTML = files.map(f => { const when = new Date(f.modifiedTime).toLocaleString(); const openHere = `<button data-open="${f.id}">Open here</button>`; const link = `https://drive.google.com/file/d/${f.id}/view`; return `<tr><td>${escapeHtml(f.name)}</td><td>${when}</td><td>${openHere} <a href="${link}" target="_blank" rel="noreferrer">Drive</a></td></tr>`; }).join(""); listBody.querySelectorAll("button[data-open]").forEach(btn => { btn.addEventListener("click", () => loadFile(btn.getAttribute("data-open"))); }); setStatus("Ready."); } catch (e) { console.error(e); setStatus("List failed. See console."); }
+    try { 
+      setStatus("Listing files…"); 
+      const files = await listGhostwriterFiles(); 
+      listBody.innerHTML = files.map(f => { 
+        const when = new Date(f.modifiedTime).toLocaleString(); 
+        const openHere = `<button data-open="${f.id}">Open here</button>`; 
+        const rename = `<button data-rename="${f.id}">Rename</button>`;
+        const link = `https://drive.google.com/file/d/${f.id}/view`; 
+        return `<tr><td>${escapeHtml(f.name)}</td><td>${when}</td><td>${openHere} ${rename} <a href="${link}" target="_blank" rel="noreferrer">Drive</a></td></tr>`; 
+      }).join(""); 
+      listBody.querySelectorAll("button[data-open]").forEach(btn => { 
+        btn.addEventListener("click", () => loadFile(btn.getAttribute("data-open"))); 
+      }); 
+      listBody.querySelectorAll("button[data-rename]").forEach(btn => { 
+        btn.addEventListener("click", () => promptRenameFile(btn.getAttribute("data-rename"))); 
+      }); 
+      setStatus("Ready."); 
+    } catch (e) { 
+      console.error(e); 
+      setStatus("List failed. See console."); 
+    }
+  }
+
+  async function promptRenameFile(fileId) {
+    try {
+      // Get current file info
+      const fileInfo = await getMeta(fileId);
+      const newName = prompt('Enter new filename:', fileInfo.name);
+      
+      if (newName && newName.trim() && newName !== fileInfo.name) {
+        setStatus("Renaming file…");
+        await renameFile(fileId, newName.trim());
+        
+        // Update the current file name if this is the active file
+        if (currentFileId === fileId) {
+          currentFileName = newName.trim();
+          activeFileEl.textContent = currentFileName;
+        }
+        
+        // Refresh the file list to show the new name
+        await refreshList();
+        setStatus("File renamed successfully.");
+      }
+    } catch (e) {
+      console.error(e);
+      setStatus("Rename failed. See console.");
+    }
   }
 
   // NOTE: This overrides the earlier one (intentionally more strict for list rendering)
