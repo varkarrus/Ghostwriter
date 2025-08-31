@@ -43,12 +43,16 @@
     /* Responsive text area constraints */
     @media (min-width: 768px) {
       main.main { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+      /* Add comfortable reading width for editor in non-split mode */
+      body:not([data-mode="split"]) #editor { max-width: 800px; margin: 0 auto; }
     }
     @media (min-width: 1200px) {
       main.main { max-width: 1600px; padding: 0 40px; }
+      body:not([data-mode="split"]) #editor { max-width: 900px; margin: 0 auto; }
     }
     @media (min-width: 1400px) {
       main.main { max-width: 1800px; padding: 0 60px; }
+      body:not([data-mode="split"]) #editor { max-width: 1000px; margin: 0 auto; }
     }
 
     /* Split / Preview-only modes */
