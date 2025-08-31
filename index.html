@@ -481,7 +481,7 @@
   const rememberKey  = document.getElementById("remember-key");
   const aiModel      = document.getElementById("ai-model");
   const modelDropdown = document.getElementById("model-dropdown");
-  const aiGenerate   = document.getElementById("ai-generate");
+
   const fixedGenerateBtn = document.getElementById("fixed-generate-btn");
   const cancelGenerateBtn = document.getElementById("cancel-generate-btn");
   const refreshModelsBtn = document.getElementById("refresh-models-btn");
@@ -699,7 +699,7 @@
       if ((e.altKey || e.metaKey && e.shiftKey) && e.key.toLowerCase() === 'm') { e.preventDefault(); const wantOpen = metaPanel.getAttribute('data-open') !== '1'; openMeta(wantOpen); return; }
       // Ctrl/Cmd+G generates AI content (if AI panel is open and configured)
       if (primary && e.key.toLowerCase() === 'g') { 
-        if (metaPanel.getAttribute('data-open') === '1' && !aiGenerate.disabled) {
+        if (metaPanel.getAttribute('data-open') === '1' && !fixedGenerateBtn.disabled) {
           e.preventDefault(); 
           generateAIContent(); 
         }
@@ -748,8 +748,7 @@
     // Save button in drawer
     metaSaveNow.addEventListener('click', () => flushSave());
 
-    // AI Generate button
-    aiGenerate.addEventListener('click', () => generateAIContent());
+
 
     // Tab switching - with retry to ensure DOM is ready
     function bindTabEvents() {
@@ -986,10 +985,7 @@
     const hasModel = aiModel.value.trim().length > 0;
     const canGenerate = hasKey && hasModel && !isGenerating;
     
-    // Update old button (remove it later)
-    if (aiGenerate) {
-      aiGenerate.disabled = !canGenerate;
-    }
+
     
     // Update fixed button
     fixedGenerateBtn.disabled = !canGenerate;
