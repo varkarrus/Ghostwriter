@@ -234,10 +234,13 @@
   //  Configuration
   // =========================
   const CLIENT_ID = "389780383024-03s13biqo3n1hvdv2mn8jb2fcvc17ks3.apps.googleusercontent.com"; // OAuth 2.0 Web client ID (public)
-  const SCOPE = "https://www.googleapis.com/auth/drive.file"; // narrow Drive scope
+  const SCOPE = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata"; // Drive scope + app data
 
   const DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files";
   const DRIVE_FILES_URL  = "https://www.googleapis.com/drive/v3/files";
+  
+  // AI Settings
+  const AI_SETTINGS_FILENAME = "ghostwriter-ai-settings.json";
 
   // Autosave + polling
   const AUTOSAVE_DELAY = 1200;  // ms after last keystroke
@@ -310,6 +313,11 @@
   let dirty = false;           // local edits (editor or metadata) since last save
   let lastInputTs = 0;         // timestamp of last edit
   let lastRemoteModified = 0;  // ms
+  
+  // AI Settings state
+  let aiSettingsFileId = null; // ID of the AI settings file in appdata folder
+  let aiSettingsLoaded = false; // whether we've attempted to load AI settings
+  let saveAISettingsTimer = null; // timer for delayed AI settings save
 
   function setStatus(msg) { statusEl.textContent = msg; }
   function setSaveDot(state) {
@@ -345,6 +353,7 @@
           accessToken = resp.access_token;
           setStatus("Signed in.");
           setSignedInUI(true);
+          loadAISettings(); // Load saved AI settings after authentication
           const preset = getQueryFileId();
           if (preset) { fileIdInput.value = preset; loadFile(preset); }
         }
@@ -371,6 +380,13 @@
     signoutBtn.addEventListener("click", () => {
       if (accessToken) {
         stopPolling();
+        // Clear AI settings state on signout
+        aiSettingsLoaded = false;
+        aiSettingsFileId = null;
+        if (!rememberKey.checked) {
+          openrouterKey.value = "";
+        }
+        updateGenerateButton();
         google.accounts.oauth2.revoke(accessToken, () => { accessToken = null; setSignedInUI(false); setActiveFile(null, null); setStatus("Signed out."); });
       }
     });
@@ -388,9 +404,17 @@
     aiPreInput.addEventListener("input", () => { markDirty(); });
     nextInstInput.addEventListener("input", () => { markDirty(); });
     nextEnabled.addEventListener("change", () => { markDirty(); });
-    openrouterKey.addEventListener("input", () => { markDirty(); updateGenerateButton(); });
-    rememberKey.addEventListener("change", () => { markDirty(); });
-    aiModel.addEventListener("change", () => { markDirty(); updateGenerateButton(); });
+    openrouterKey.addEventListener("input", () => { 
+      markDirty(); 
+      updateGenerateButton(); 
+      // Save API key after user stops typing (only if remember is checked)
+      if (rememberKey.checked) {
+        clearTimeout(saveAISettingsTimer);
+        saveAISettingsTimer = setTimeout(() => saveAISettings(), 2000);
+      }
+    });
+    rememberKey.addEventListener("change", () => { markDirty(); saveAISettings(); });
+    aiModel.addEventListener("change", () => { markDirty(); updateGenerateButton(); saveAISettings(); });
 
     // Drawer open/close
     const toggle = () => openMeta(metaPanel.getAttribute('data-open') !== '1');
@@ -624,6 +648,121 @@
       aiGenerate.disabled = false;
       aiGenerate.textContent = "Generate with AI";
       updateGenerateButton();
+    }
+  }
+
+  // =========================
+  //  AI Settings Persistence (Google Drive AppData)
+  // =========================
+  async function findAISettingsFile() {
+    try {
+      const url = new URL(DRIVE_FILES_URL);
+      url.searchParams.set("q", `name='${AI_SETTINGS_FILENAME}' and parents in 'appdata'`);
+      url.searchParams.set("spaces", "appdata");
+      url.searchParams.set("fields", "files(id,name)");
+      
+      const res = await fetch(url.toString(), { headers: authHeader() });
+      if (res.status === 401) { await refreshToken(); return findAISettingsFile(); }
+      if (!res.ok) throw new Error(`Find AI settings failed: ${res.status}`);
+      
+      const { files } = await res.json();
+      return files && files.length > 0 ? files[0].id : null;
+    } catch (e) {
+      console.warn("Failed to find AI settings file:", e);
+      return null;
+    }
+  }
+
+  async function loadAISettings() {
+    if (!accessToken || aiSettingsLoaded) return;
+    
+    try {
+      aiSettingsFileId = await findAISettingsFile();
+      if (!aiSettingsFileId) {
+        aiSettingsLoaded = true;
+        return; // No settings file exists yet
+      }
+
+      const res = await fetch(`${DRIVE_FILES_URL}/${aiSettingsFileId}?alt=media`, { headers: authHeader() });
+      if (res.status === 401) { await refreshToken(); return loadAISettings(); }
+      if (!res.ok) throw new Error(`Load AI settings failed: ${res.status}`);
+      
+      const settingsText = await res.text();
+      const settings = JSON.parse(settingsText);
+      
+      // Apply settings to UI (but only if remember_key is true for API key)
+      if (settings.ai_model) {
+        aiModel.value = settings.ai_model;
+      }
+      if (settings.remember_key && settings.openrouter_key) {
+        openrouterKey.value = settings.openrouter_key;
+        rememberKey.checked = true;
+      } else {
+        rememberKey.checked = false;
+      }
+      
+      updateGenerateButton();
+      aiSettingsLoaded = true;
+      console.log("AI settings loaded from Drive");
+    } catch (e) {
+      console.warn("Failed to load AI settings:", e);
+      aiSettingsLoaded = true;
+    }
+  }
+
+  async function saveAISettings() {
+    if (!accessToken) return;
+    
+    try {
+      const settings = {
+        ai_model: aiModel.value || "",
+        remember_key: !!rememberKey.checked,
+        openrouter_key: rememberKey.checked ? (openrouterKey.value || "") : "",
+        last_updated: new Date().toISOString()
+      };
+      
+      const settingsJson = JSON.stringify(settings, null, 2);
+      
+      if (aiSettingsFileId) {
+        // Update existing file
+        const res = await fetch(`${DRIVE_UPLOAD_URL}/${aiSettingsFileId}?uploadType=media`, {
+          method: "PATCH",
+          headers: { ...authHeader(), "Content-Type": "application/json; charset=UTF-8" },
+          body: settingsJson
+        });
+        if (res.status === 401) { await refreshToken(); return saveAISettings(); }
+        if (!res.ok) throw new Error(`Update AI settings failed: ${res.status}`);
+      } else {
+        // Create new file in appdata folder
+        const boundary = "-------AISettings-" + Math.random().toString(36).slice(2);
+        const metadata = { 
+          name: AI_SETTINGS_FILENAME, 
+          parents: ["appdata"],
+          mimeType: "application/json"
+        };
+        const body = `--${boundary}\r\n` +
+          `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+          JSON.stringify(metadata) + `\r\n` +
+          `--${boundary}\r\n` +
+          `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+          settingsJson + `\r\n` +
+          `--${boundary}--`;
+          
+        const res = await fetch(`${DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id`, {
+          method: "POST",
+          headers: { ...authHeader(), "Content-Type": `multipart/related; boundary=${boundary}` },
+          body
+        });
+        if (res.status === 401) { await refreshToken(); return saveAISettings(); }
+        if (!res.ok) throw new Error(`Create AI settings failed: ${res.status}`);
+        
+        const result = await res.json();
+        aiSettingsFileId = result.id;
+      }
+      
+      console.log("AI settings saved to Drive");
+    } catch (e) {
+      console.warn("Failed to save AI settings:", e);
     }
   }
 
