@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>GhostWriter — Drive-only Sync + Markdown Formatting</title>
+  <title>GhostWriter — Drive-only + Markdown + Live Preview</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <!-- Google Identity Services (OAuth in browser) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -19,7 +19,29 @@
     .toolbar button, .toolbar select { padding: 8px 10px; border: 1px solid var(--line); background: #fff; border-radius: 10px; cursor: pointer; }
     .toolbar button[disabled] { opacity: 0.5; cursor: not-allowed; }
     .toolbar input[type="text"] { flex: 1; min-width: 220px; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
+
+    /* Main editor/preview area */
+    main.main { display: grid; grid-template-columns: 1fr; height: 100%; min-height: 0; }
+    #editor-wrap, #preview { min-height: 0; }
+
     #editor { width: 100%; height: 100%; padding: 16px; border: none; outline: none; resize: none; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    #preview { display:none; padding: 18px; overflow:auto; background:#fff; border-left: 1px solid var(--line); }
+
+    /* Split / Preview-only modes */
+    body[data-mode="split"] main.main { grid-template-columns: 1fr 1fr; }
+    body[data-mode="split"] #preview { display:block; }
+    body[data-mode="preview"] #editor-wrap { display:none; }
+    body[data-mode="preview"] #preview { display:block; }
+
+    /* Preview typography */
+    #preview h1, #preview h2, #preview h3, #preview h4, #preview h5, #preview h6 { margin: 1.2em 0 0.5em; line-height:1.2; }
+    #preview h1 { font-size: 1.6rem; }
+    #preview h2 { font-size: 1.4rem; }
+    #preview h3 { font-size: 1.25rem; }
+    #preview p { margin: 0.5em 0; }
+    #preview ul { margin: 0.5em 0 0.5em 1.2em; }
+    #preview li { margin: 0.25em 0; }
+
     .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; background: #eee; font-size: 12px; }
     #list-panel { max-height: 40vh; overflow: auto; border-top: 1px solid var(--line); background: #fff; display: none; }
     #list-panel table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -33,7 +55,7 @@
     .dot.idle { background:#bbb; }
   </style>
 </head>
-<body>
+<body data-mode="edit">
 <div class="app">
   <header>
     <div class="toolbar">
@@ -62,6 +84,8 @@
           <option value="5">H5</option>
           <option value="6">H6</option>
         </select>
+        <button id="toggle-preview">Preview</button>
+        <button id="toggle-split">Split</button>
       </div>
     </div>
     <div id="list-panel">
@@ -72,7 +96,12 @@
     </div>
   </header>
 
-  <textarea id="editor" placeholder="Write your story here…"></textarea>
+  <main class="main">
+    <div id="editor-wrap">
+      <textarea id="editor" placeholder="Write your story here…"></textarea>
+    </div>
+    <div id="preview" aria-live="polite"></div>
+  </main>
 
   <footer>
     <span id="status">Ready.</span>
@@ -87,7 +116,7 @@
   //  Configuration
   // =========================
   // OAuth 2.0 Web client ID (public identifier)
-  const CLIENT_ID = "389780383024-03s13biqo3n1hvdv2mn8jb2fcvc17ks3.apps.googleusercontent.com";
+  const CLIENT_ID = "YOUR_GOOGLE_OAUTH_CLIENT_ID_HERE";
   // Narrow Drive scope: create/read/update files this app created or explicitly opened with it.
   const SCOPE = "https://www.googleapis.com/auth/drive.file";
 
@@ -121,6 +150,9 @@
   const underlineBtn = document.getElementById("underline-btn");
   const bulletBtn    = document.getElementById("bullet-btn");
   const headingSel   = document.getElementById("heading-select");
+  const togglePreviewBtn = document.getElementById("toggle-preview");
+  const toggleSplitBtn   = document.getElementById("toggle-split");
+  const previewEl    = document.getElementById("preview");
 
   // =========================
   //  Auth & state
@@ -154,7 +186,7 @@
     signoutBtn.disabled = !signedIn;
     listBtn.disabled = !signedIn;
     fileIdInput.disabled = !signedIn;
-    [boldBtn, italicBtn, underlineBtn, bulletBtn, headingSel].forEach(el => el.disabled = !signedIn);
+    [boldBtn, italicBtn, underlineBtn, bulletBtn, headingSel, togglePreviewBtn, toggleSplitBtn].forEach(el => el.disabled = !signedIn);
   }
   function getQueryFileId() {
     const p = new URLSearchParams(location.search);
@@ -228,8 +260,8 @@
       }
     }));
 
-    // Typing: mark dirty and schedule autosave
-    editor.addEventListener("input", () => { markDirty(); });
+    // Typing: mark dirty and schedule autosave + update preview
+    editor.addEventListener("input", () => { markDirty(); updatePreview(); });
 
     // Try to flush on tab close/background
     window.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave({ silent:true }); });
@@ -255,7 +287,7 @@
       if (e.key === "Tab") {
         const { start, end } = getSelection(editor);
         const lines = getSelectedLineRange(editor.value, start, end);
-        if (lines.text.match(/^(-\s|\s*)/m)) { // likely list-y
+        if (lines.text.match(/^(\-\s|\s*)/m)) { // likely list-y
           e.preventDefault();
           if (e.shiftKey) outdentSelection(); else indentSelection();
         }
@@ -263,13 +295,26 @@
     });
 
     // Toolbar
-    boldBtn.addEventListener("click", toggleBold);
-    italicBtn.addEventListener("click", toggleItalic);
-    underlineBtn.addEventListener("click", toggleUnderline);
-    bulletBtn.addEventListener("click", toggleBulleted);
+    boldBtn.addEventListener("click", () => { toggleBold(); updatePreview(); });
+    italicBtn.addEventListener("click", () => { toggleItalic(); updatePreview(); });
+    underlineBtn.addEventListener("click", () => { toggleUnderline(); updatePreview(); });
+    bulletBtn.addEventListener("click", () => { toggleBulleted(); updatePreview(); });
     headingSel.addEventListener("change", () => {
       const lvl = parseInt(headingSel.value, 10);
-      if (!isNaN(lvl)) toggleHeading(lvl);
+      if (!isNaN(lvl)) { toggleHeading(lvl); updatePreview(); }
+    });
+
+    togglePreviewBtn.addEventListener("click", () => {
+      const mode = document.body.getAttribute("data-mode");
+      const next = mode === "preview" ? "edit" : "preview";
+      document.body.setAttribute("data-mode", next);
+      updatePreview();
+    });
+    toggleSplitBtn.addEventListener("click", () => {
+      const mode = document.body.getAttribute("data-mode");
+      const next = mode === "split" ? "edit" : "split";
+      document.body.setAttribute("data-mode", next);
+      updatePreview();
     });
   }
 
@@ -296,13 +341,11 @@
     const before = value.slice(0, start);
     const after  = value.slice(end);
 
-    // Detect wrapped
     const allL = [markerL, ...altL];
     const allR = [markerR, ...altR];
     const isWrapped = allL.some((L,i) => sel.startsWith(L) && sel.endsWith(allR[i] || markerR));
 
     if (isWrapped) {
-      // unwrap
       let unwrapped = sel;
       allL.forEach((L,i)=>{
         const R = allR[i] || markerR;
@@ -312,7 +355,6 @@
       });
       applyChange(before + unwrapped + after, start, start + unwrapped.length);
     } else {
-      // wrap; if empty selection, place caret inside
       const insertL = markerL; const insertR = markerR;
       if (start === end) {
         const nv = before + insertL + insertR + after;
@@ -327,11 +369,10 @@
 
   function toggleBold(){ wrapOrUnwrapSelection("**", "**", { altL:["__"], altR:["__"] }); }
   function toggleItalic(){ wrapOrUnwrapSelection("*", "*", { altL:["_"], altR:["_"] }); }
-  // Markdown has no native underline; HTML tags are valid in Markdown, so we use <u>text</u>
   function toggleUnderline(){ wrapOrUnwrapSelection("<u>", "</u>"); }
 
   function getSelectedLineRange(text, start, end){
-    const lineStart = text.lastIndexOf("\n", start - 1) + 1; // -1 -> 0
+    const lineStart = text.lastIndexOf("\n", start - 1) + 1;
     let lineEnd = text.indexOf("\n", end);
     if (lineEnd === -1) lineEnd = text.length;
     return { start: lineStart, end: lineEnd, text: text.slice(lineStart, lineEnd) };
@@ -343,7 +384,7 @@
     const lines = value.slice(range.start, range.end).split("\n");
     const allBulleted = lines.every(l => /^\s*-\s/.test(l) || l.trim() === "");
     const changed = lines.map(l => {
-      if (l.trim() === "") return l; // keep blank lines
+      if (l.trim() === "") return l;
       if (allBulleted) return l.replace(/^\s*-\s?/, "");
       return l.replace(/^\s*/, "$&- ");
     }).join("\n");
@@ -358,16 +399,10 @@
     const lines = range.text.split("\n");
     const prefix = "#".repeat(Math.min(Math.max(level,0),6));
     const changed = lines.map(l => {
-      if (l.trim() === "") return l; // keep blank lines
+      if (l.trim() === "") return l;
       const cur = l.match(/^\s*(#{1,6})\s+/);
-      if (level === 0) { // Paragraph
-        return cur ? l.replace(/^\s*#{1,6}\s+/, "") : l;
-      }
-      if (cur && cur[1].length === level) {
-        // toggle off if exactly same level
-        return l.replace(/^\s*#{1,6}\s+/, "");
-      }
-      // replace any existing heading with desired
+      if (level === 0) { return cur ? l.replace(/^\s*#{1,6}\s+/, "") : l; }
+      if (cur && cur[1].length === level) { return l.replace(/^\s*#{1,6}\s+/, ""); }
       return l.replace(/^\s*(#{1,6}\s+)?/, prefix + " ");
     }).join("\n");
     const nv = value.slice(0, range.start) + changed + value.slice(range.end);
@@ -392,6 +427,82 @@
     const nv = value.slice(0, range.start) + changed + value.slice(range.end);
     const delta = changed.length - (range.end - range.start);
     applyChange(nv, Math.max(range.start, start - 2), Math.max(range.start, end + delta - 2));
+  }
+
+  // =========================
+  //  Markdown renderer (safe-ish)
+  // =========================
+  function escapeHtml(str){
+    return String(str).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+  }
+  function applyInline(md){
+    // Escape HTML first
+    let s = escapeHtml(md);
+    // Bold **text**
+    s = s.replace(/\*\*([^\n*]+)\*\*/g, '<strong>$1</strong>');
+    // Italic *text* (avoid **)
+    s = s.replace(/(^|[^*])\*([^\n*]+)\*(?!\*)/g, '$1<em>$2</em>');
+    // Underline via escaped tags
+    s = s.replace(/&lt;u&gt;([\s\S]*?)&lt;\/u&gt;/g, '<u>$1</u>');
+    return s;
+  }
+  function renderMarkdown(md){
+    const lines = md.replace(/\r\n/g,'\n').split('\n');
+    let html = '';
+    let inList = false;
+    const flushList = () => { if (inList) { html += '</ul>'; inList = false; } };
+
+    for (let i=0;i<lines.length;i++){
+      const line = lines[i];
+      // Headings
+      const h = line.match(/^(#{1,6})\s+(.*)$/);
+      if (h){
+        flushList();
+        const lvl = h[1].length; const text = h[2];
+        html += `<h${lvl}>${applyInline(text)}</h${lvl}>`;
+        continue;
+      }
+      // Bullets (single-level)
+      const b = line.match(/^\s*-\s+(.*)$/);
+      if (b){
+        if (!inList){ html += '<ul>'; inList = true; }
+        html += `<li>${applyInline(b[1])}</li>`;
+        continue;
+      }
+      // Blank line
+      if (/^\s*$/.test(line)) { flushList(); html += '<br />'; continue; }
+      // Paragraph line
+      flushList();
+      html += `<p>${applyInline(line)}</p>`;
+    }
+    flushList();
+    return sanitizeHTML(html);
+  }
+  function sanitizeHTML(html){
+    const allowed = new Set(['H1','H2','H3','H4','H5','H6','P','STRONG','EM','U','UL','LI','BR']);
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    (function walk(node){
+      const children = Array.from(node.childNodes);
+      for (const child of children){
+        if (child.nodeType === 1){ // element
+          if (!allowed.has(child.tagName)){
+            // unwrap disallowed element, keep its children
+            while (child.firstChild) node.insertBefore(child.firstChild, child);
+            node.removeChild(child);
+            continue;
+          }
+          // strip attributes just in case
+          const attrs = Array.from(child.attributes);
+          for (const a of attrs) child.removeAttribute(a.name);
+          walk(child);
+        }
+      }
+    })(tmp);
+    return tmp.innerHTML;
+  }
+  function updatePreview(){
+    previewEl.innerHTML = renderMarkdown(editor.value || '');
   }
 
   // =========================
@@ -483,6 +594,7 @@
       const u = new URL(location.href);
       u.searchParams.set("file", meta.id);
       history.replaceState({}, "", u.toString());
+      updatePreview();
     } catch (e) { console.error(e); setStatus("Failed to create file. See console."); }
   }
 
@@ -500,6 +612,7 @@
       const u = new URL(location.href);
       u.searchParams.set("file", id);
       history.replaceState({}, "", u.toString());
+      updatePreview();
     } catch (e) { console.error(e); setStatus("Failed to load file. Check ID and permissions."); }
   }
 
@@ -551,6 +664,7 @@
         lastRemoteMd5 = remoteMd5;
         syncNote.textContent = `Updated from Drive at ${new Date().toLocaleTimeString()}`;
         setStatus("Pulled latest changes from Drive.");
+        updatePreview();
       }
     } catch (e) { console.warn("Polling error", e); }
   }
@@ -570,10 +684,6 @@
       });
       setStatus("Ready.");
     } catch (e) { console.error(e); setStatus("List failed. See console."); }
-  }
-
-  function escapeHtml(str){
-    return String(str).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'", '&#039;');
   }
 </script>
 </body>
