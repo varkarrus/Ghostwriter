@@ -392,8 +392,11 @@
     }
     .story-dex-controls {
       margin-bottom: 20px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
     }
-    .add-dex-entry {
+    .add-dex-entry, .export-dex, .import-dex {
       position: sticky;
       top: 0;
       background: #007bff;
@@ -406,8 +409,22 @@
       box-shadow: 0 2px 4px rgba(0, 123, 255, 0.3);
       z-index: 10;
     }
-    .add-dex-entry:hover {
+    .add-dex-entry:hover, .export-dex:hover, .import-dex:hover {
       background: #0056b3;
+    }
+    .export-dex {
+      background: #28a745;
+      box-shadow: 0 2px 4px rgba(40, 167, 69, 0.3);
+    }
+    .export-dex:hover {
+      background: #1e7e34;
+    }
+    .import-dex {
+      background: #6c757d;
+      box-shadow: 0 2px 4px rgba(108, 117, 125, 0.3);
+    }
+    .import-dex:hover {
+      background: #545b62;
     }
     .story-dex-entries {
       display: flex;
@@ -900,6 +917,9 @@
     <div class="story-dex-body">
       <div class="story-dex-controls">
         <button id="add-dex-entry" class="add-dex-entry">+ Add Entry</button>
+        <button id="export-dex" class="export-dex">Export</button>
+        <button id="import-dex" class="import-dex">Import</button>
+        <input type="file" id="import-dex-file" accept=".json" style="display: none;" />
       </div>
       <div id="story-dex-entries" class="story-dex-entries">
         <!-- Entries will be populated here -->
@@ -1029,6 +1049,9 @@
   const storyDexModal = document.getElementById("story-dex-modal");
   const storyDexClose = document.getElementById("story-dex-close");
   const addDexEntryBtn = document.getElementById("add-dex-entry");
+  const exportDexBtn = document.getElementById("export-dex");
+  const importDexBtn = document.getElementById("import-dex");
+  const importDexFile = document.getElementById("import-dex-file");
   const storyDexEntries = document.getElementById("story-dex-entries");
   
   const previewInputBtn = document.getElementById("preview-input-btn");
@@ -1493,6 +1516,9 @@
     storyDexClose.addEventListener('click', closeStoryDex);
     storyDexModal.querySelector('.story-dex-overlay').addEventListener('click', closeStoryDex);
     addDexEntryBtn.addEventListener('click', addDexEntry);
+    exportDexBtn.addEventListener('click', exportStoryDex);
+    importDexBtn.addEventListener('click', () => importDexFile.click());
+    importDexFile.addEventListener('change', importStoryDex);
     
     // Preview Input event handlers
     previewInputBtn.addEventListener('click', openPreviewInput);
@@ -2310,6 +2336,109 @@
         removeDexEntry(id);
       });
     });
+  }
+
+  function exportStoryDex() {
+    if (currentStoryDex.length === 0) {
+      setStatus("No Story Dex entries to export.");
+      return;
+    }
+    
+    const dataStr = JSON.stringify(currentStoryDex, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `story-dex-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    setStatus(`Exported ${currentStoryDex.length} Story Dex entries.`);
+  }
+
+  async function importStoryDex(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const importedEntries = JSON.parse(text);
+      
+      if (!Array.isArray(importedEntries)) {
+        setStatus("Invalid file format. Expected JSON array.");
+        return;
+      }
+
+      // Validate entries have required fields
+      const validEntries = importedEntries.filter(entry => 
+        entry && typeof entry === 'object' && 
+        typeof entry.name === 'string'
+      );
+
+      if (validEntries.length === 0) {
+        setStatus("No valid entries found in import file.");
+        return;
+      }
+
+      // Find potential overwrites (case insensitive name matching)
+      const existingNames = currentStoryDex.map(entry => (entry.name || '').toLowerCase());
+      const overwrites = validEntries.filter(entry => 
+        existingNames.includes((entry.name || '').toLowerCase())
+      );
+
+      // Show confirmation if there are overwrites
+      if (overwrites.length > 0) {
+        const confirmed = confirm(
+          `This import will overwrite ${overwrites.length} existing entries with the same names. Continue?`
+        );
+        if (!confirmed) {
+          event.target.value = ''; // Reset file input
+          return;
+        }
+      }
+
+      // Perform the merge
+      const mergedEntries = [...currentStoryDex];
+      
+      validEntries.forEach(importedEntry => {
+        // Ensure the entry has all required fields
+        const entry = {
+          id: importedEntry.id || Date.now() + Math.random(), // Generate new ID if missing
+          name: importedEntry.name || '',
+          description: importedEntry.description || '',
+          keywords: importedEntry.keywords || ''
+        };
+
+        // Find if entry with same name already exists (case insensitive)
+        const existingIndex = mergedEntries.findIndex(existing => 
+          (existing.name || '').toLowerCase() === (entry.name || '').toLowerCase()
+        );
+
+        if (existingIndex !== -1) {
+          // Replace existing entry
+          mergedEntries[existingIndex] = entry;
+        } else {
+          // Add new entry
+          mergedEntries.push(entry);
+        }
+      });
+
+      currentStoryDex = mergedEntries;
+      renderStoryDex();
+      markDirty();
+      
+      setStatus(`Imported ${validEntries.length} entries. ${overwrites.length} entries were overwritten.`);
+      
+    } catch (error) {
+      console.error('Import error:', error);
+      setStatus("Failed to import Story Dex. Invalid JSON format.");
+    }
+
+    // Reset file input for next import
+    event.target.value = '';
   }
 
   // =========================
