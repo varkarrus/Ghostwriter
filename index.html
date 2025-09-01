@@ -7,7 +7,21 @@
   <!-- Google Identity Services (OAuth in browser) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
-    :root { --bg:#ffffff; --muted:#f6f6f6; --line:#e8e8e8; --ink:#111; --sub:#555; --meta-w: 380px; }
+    :root { 
+      --bg:#ffffff; --muted:#f6f6f6; --line:#e8e8e8; --ink:#111; --sub:#555; --meta-w: 380px; 
+      --editor-font-size: 14px;
+      --editor-font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+    }
+    
+    /* Font family options */
+    [data-font-family="mono"] { --editor-font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace; }
+    [data-font-family="serif"] { --editor-font-family: Georgia, 'Times New Roman', Times, serif; }
+    [data-font-family="sans-serif"] { --editor-font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    
+    /* Dark mode variables */
+    [data-theme="dark"] {
+      --bg:#1a1a1a; --muted:#2d2d2d; --line:#404040; --ink:#e0e0e0; --sub:#aaa;
+    }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
     body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
@@ -35,7 +49,7 @@
     #editor-wrap, #preview { min-height: 0; }
     #editor { 
       width: 100%; height: 100%; padding: 16px; border: none; outline: none; resize: none; 
-      font: 14px/1.6 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+      font: var(--editor-font-size, 14px)/1.6 var(--editor-font-family, 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace);
       max-width: none;
     }
     #preview { display:none; padding: 18px; overflow:auto; background:#fff; border-left: 1px solid var(--line); }
@@ -667,12 +681,25 @@
         <label>Theme</label>
         <select id="theme-select">
           <option value="light">Light</option>
-          <option value="dark" disabled>Dark (Coming Soon)</option>
+          <option value="dark">Dark</option>
         </select>
       </div>
       <div class="row">
-        <label>Editor Font Size</label>
-        <input type="range" id="font-size" min="12" max="18" step="1" value="14" />
+        <label>Editor Font Family</label>
+        <select id="editor-font-family">
+          <option value="mono">Monospace (Default)</option>
+          <option value="serif">Serif</option>
+          <option value="sans-serif">Sans Serif</option>
+        </select>
+      </div>
+      <div class="row" id="desktop-font-row">
+        <label>Editor Font Size (Desktop)</label>
+        <input type="range" id="font-size-desktop" min="12" max="24" step="1" value="14" />
+        <span class="range-value">14px</span>
+      </div>
+      <div class="row" id="mobile-font-row" style="display: none;">
+        <label>Editor Font Size (Mobile)</label>
+        <input type="range" id="font-size-mobile" min="12" max="20" step="1" value="14" />
         <span class="range-value">14px</span>
       </div>
     </div>
@@ -795,6 +822,14 @@
   const aiPreInput   = document.getElementById("ai-pre");
   const nextInstInput= document.getElementById("next-inst");
   const nextEnabled  = document.getElementById("next-enabled");
+  
+  // Display settings elements
+  const themeSelect     = document.getElementById("theme-select");
+  const fontFamilySelect= document.getElementById("editor-font-family");
+  const fontSizeDesktop = document.getElementById("font-size-desktop");
+  const fontSizeMobile  = document.getElementById("font-size-mobile");
+  const desktopFontRow  = document.getElementById("desktop-font-row");
+  const mobileFontRow   = document.getElementById("mobile-font-row");
   
   // Story Dex elements
   const storyDexBtn = document.getElementById("story-dex-btn");
@@ -1013,6 +1048,30 @@
     });
     aiModel.addEventListener("change", () => { markDirty(); updateGenerateButton(); saveAISettings(); });
 
+    // Display settings event listeners
+    themeSelect.addEventListener("change", () => { 
+      applyTheme(themeSelect.value); 
+      saveAISettings(); 
+    });
+    fontFamilySelect.addEventListener("change", () => { 
+      applyFontFamily(fontFamilySelect.value); 
+      saveAISettings(); 
+    });
+    fontSizeDesktop.addEventListener("input", () => { 
+      updateFontSizeDisplay(fontSizeDesktop); 
+      applyFontSize();
+    });
+    fontSizeDesktop.addEventListener("change", () => { 
+      saveAISettings(); 
+    });
+    fontSizeMobile.addEventListener("input", () => { 
+      updateFontSizeDisplay(fontSizeMobile); 
+      applyFontSize();
+    });
+    fontSizeMobile.addEventListener("change", () => { 
+      saveAISettings(); 
+    });
+
     // Drawer open/close
     const toggle = () => openMeta(metaPanel.getAttribute('data-open') !== '1');
     metaTab.addEventListener('click', () => { if (metaTab.getAttribute('aria-disabled') === 'true') return; toggle(); });
@@ -1166,6 +1225,17 @@
     previewInputBtn.addEventListener('click', openPreviewInput);
     previewInputClose.addEventListener('click', closePreviewInput);
     previewInputModal.querySelector('.preview-input-overlay').addEventListener('click', closePreviewInput);
+    
+    // Initialize display settings
+    updateFontSizeRowVisibility();
+    updateFontSizeDisplay(fontSizeDesktop);
+    updateFontSizeDisplay(fontSizeMobile);
+    
+    // Media query listener for responsive font size controls
+    window.matchMedia('(max-width: 768px)').addEventListener('change', () => {
+      updateFontSizeRowVisibility();
+      applyFontSize();
+    });
   }
 
   // Drawer controller
@@ -2014,12 +2084,68 @@
         rememberKey.checked = false;
       }
       
+      // Apply display preferences
+      if (settings.theme) {
+        themeSelect.value = settings.theme;
+        applyTheme(settings.theme);
+      }
+      if (settings.font_family) {
+        fontFamilySelect.value = settings.font_family;
+        applyFontFamily(settings.font_family);
+      }
+      if (settings.font_size_desktop) {
+        fontSizeDesktop.value = settings.font_size_desktop;
+        updateFontSizeDisplay(fontSizeDesktop);
+      }
+      if (settings.font_size_mobile) {
+        fontSizeMobile.value = settings.font_size_mobile;
+        updateFontSizeDisplay(fontSizeMobile);
+      }
+      
+      // Apply current font size based on screen size
+      applyFontSize();
+      
       updateGenerateButton();
       aiSettingsLoaded = true;
       console.log("AI settings loaded from Drive");
     } catch (e) {
       console.warn("Failed to load AI settings:", e);
       aiSettingsLoaded = true;
+    }
+  }
+
+  // =========================
+  //  Display Settings Helpers
+  // =========================
+  function applyTheme(theme) {
+    document.body.setAttribute('data-theme', theme);
+  }
+
+  function applyFontFamily(family) {
+    document.body.setAttribute('data-font-family', family);
+  }
+
+  function applyFontSize() {
+    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+    const fontSize = isMobile ? fontSizeMobile.value : fontSizeDesktop.value;
+    document.documentElement.style.setProperty('--editor-font-size', fontSize + 'px');
+  }
+
+  function updateFontSizeDisplay(slider) {
+    const rangeValue = slider.parentNode.querySelector('.range-value');
+    if (rangeValue) {
+      rangeValue.textContent = slider.value + 'px';
+    }
+  }
+
+  function updateFontSizeRowVisibility() {
+    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+    if (isMobile) {
+      desktopFontRow.style.display = 'none';
+      mobileFontRow.style.display = 'grid';
+    } else {
+      desktopFontRow.style.display = 'grid';
+      mobileFontRow.style.display = 'none';
     }
   }
 
@@ -2031,6 +2157,11 @@
         ai_model: aiModel.value || "",
         remember_key: !!rememberKey.checked,
         openrouter_key: rememberKey.checked ? (openrouterKey.value || "") : "",
+        // Display preferences
+        theme: themeSelect.value || "light",
+        font_family: fontFamilySelect.value || "mono",
+        font_size_desktop: parseInt(fontSizeDesktop.value) || 14,
+        font_size_mobile: parseInt(fontSizeMobile.value) || 14,
         last_updated: new Date().toISOString()
       };
       
