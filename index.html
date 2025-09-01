@@ -1357,6 +1357,44 @@
     setStatus("Generation cancelled.");
   }
 
+  function findMatchingStoryDexEntries(text) {
+    if (!text || !currentStoryDex || currentStoryDex.length === 0) {
+      return [];
+    }
+
+    const matchedEntries = [];
+    const seenEntryIds = new Set();
+
+    // For each Story Dex entry
+    for (const entry of currentStoryDex) {
+      if (!entry.keywords || !entry.keywords.trim()) {
+        continue;
+      }
+
+      // Split keywords by comma and check each one
+      const keywords = entry.keywords.split(',').map(k => k.trim()).filter(k => k);
+      
+      for (const keyword of keywords) {
+        if (!keyword) continue;
+
+        // Create regex for whole word matching with optional plural 's'
+        // \b ensures word boundaries, and s? makes the 's' optional for plurals
+        const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}s?\\b`, 'gi');
+        
+        if (regex.test(text)) {
+          // Found a match, add entry if not already added
+          if (!seenEntryIds.has(entry.id)) {
+            matchedEntries.push(entry);
+            seenEntryIds.add(entry.id);
+          }
+          break; // No need to check other keywords for this entry
+        }
+      }
+    }
+
+    return matchedEntries;
+  }
+
   async function generateAIContent() {
     if (!openrouterKey.value.trim() || !aiModel.value.trim()) {
       setStatus("Please enter OpenRouter API key and select a model.");
@@ -1424,6 +1462,85 @@
         } else {
           // No paragraphs yet, add instructions
           prompt += `\n\n[${nextInstInput.value.trim()}]`;
+        }
+      }
+
+      // Find and add Story Dex entries based on keyword matches
+      let textToScan = limitedContent;
+      if (nextEnabled.checked && nextInstInput.value.trim()) {
+        textToScan += '\n\n' + nextInstInput.value.trim();
+      }
+      
+      const matchedDexEntries = findMatchingStoryDexEntries(textToScan);
+      if (matchedDexEntries.length > 0) {
+        const dexEntriesText = matchedDexEntries
+          .map(entry => `[${entry.name}: ${entry.description}]`)
+          .join('\n');
+        
+        // Insert Story Dex entries after preprompt but before main content
+        if (aiPreInput.value.trim()) {
+          // If there's a preprompt, add Story Dex entries after it
+          prompt = `[${aiPreInput.value.trim()}]\n\n${dexEntriesText}\n\n${limitedContent}`;
+        } else {
+          // If no preprompt, add Story Dex entries at the beginning
+          prompt = `${dexEntriesText}\n\n${limitedContent}`;
+        }
+        
+        // Re-add next instructions if they were in the original prompt
+        if (nextEnabled.checked && nextInstInput.value.trim()) {
+          const paragraphs = limitedContent.split(/\n\s*\n/).filter(p => p.trim());
+          if (paragraphs.length > 0) {
+            const lastParagraph = paragraphs[paragraphs.length - 1].trim();
+            if (lastParagraph && /[.!?]$/.test(lastParagraph)) {
+              prompt += `\n\n[${nextInstInput.value.trim()}]`;
+            } else {
+              prompt += `\n\n[${nextInstInput.value.trim()}]`;
+            }
+          } else {
+            prompt += `\n\n[${nextInstInput.value.trim()}]`;
+          }
+        }
+        
+        // Check if the new prompt exceeds max input length and truncate if needed
+        const maxInputLength = parseInt(maxInputCharactersInput.value) || 32000;
+        if (prompt.length > maxInputLength) {
+          // We need to truncate content while preserving preprompt, Story Dex entries, and next instructions
+          let preservedStart = '';
+          let preservedEnd = '';
+          
+          if (aiPreInput.value.trim()) {
+            preservedStart += `[${aiPreInput.value.trim()}]\n\n`;
+          }
+          preservedStart += dexEntriesText + '\n\n';
+          
+          if (nextEnabled.checked && nextInstInput.value.trim()) {
+            preservedEnd = `\n\n[${nextInstInput.value.trim()}]`;
+          }
+          
+          const availableLength = maxInputLength - preservedStart.length - preservedEnd.length;
+          
+          if (availableLength > 100) { // Ensure we have some reasonable space for content
+            const paragraphs = limitedContent.split(/\n\s*\n/).filter(p => p.trim());
+            let truncatedContent = '';
+            let totalLength = 0;
+            
+            // Work backwards from the end to include the most recent paragraphs
+            for (let i = paragraphs.length - 1; i >= 0; i--) {
+              const paragraph = paragraphs[i];
+              if (totalLength + paragraph.length + 2 > availableLength && truncatedContent) {
+                break;
+              }
+              truncatedContent = paragraph + (truncatedContent ? '\n\n' + truncatedContent : '');
+              totalLength += paragraph.length + 2;
+            }
+            
+            prompt = preservedStart + truncatedContent + preservedEnd;
+            
+            if (truncatedContent.length < limitedContent.length) {
+              const truncatedParagraphs = truncatedContent.split(/\n\s*\n/).filter(p => p.trim()).length;
+              setStatus(`Content truncated to recent ${truncatedParagraphs} paragraphs due to length limit (including ${matchedDexEntries.length} Story Dex entries).`);
+            }
+          }
         }
       }
 
