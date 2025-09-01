@@ -2129,6 +2129,9 @@
       setGenerationState(true);
       setStatus("Generating AI content...");
 
+      // Jump to last page when starting generation (after validation)
+      jumpToLastPageAndScrollToBottom();
+
       // Build the prompt using the extracted function
       const prompt = buildAIPrompt();
 
@@ -2215,6 +2218,9 @@
       
       applyChange(newValue, newCursorPos, newCursorPos);
       updatePreview();
+      
+      // Jump to last page and scroll to bottom after successful generation
+      jumpToLastPageAndScrollToBottom();
       
       setStatus("AI content generated successfully.");
     } catch (error) {
@@ -2847,12 +2853,31 @@
     showCurrentPage();
   }
 
+  function jumpToLastPageAndScrollToBottom() {
+    if (isPaginationActive && totalPages > 1) {
+      // Navigate to the last page
+      navigateToPage(totalPages);
+    }
+    
+    // Set cursor to the end of the content and scroll to bottom
+    const textLength = editor.value.length;
+    setSelection(editor, textLength, textLength);
+    
+    // Scroll editor to bottom
+    editor.scrollTop = editor.scrollHeight;
+    
+    // Focus the editor
+    editor.focus();
+  }
+
   function togglePagination(enabled) {
     isPaginationActive = enabled;
     
     if (enabled) {
       // Initialize pagination
       updatePagination();
+      // Jump to last page and scroll to bottom when enabling pagination
+      jumpToLastPageAndScrollToBottom();
     } else {
       // Show full content
       if (pageContent.length > 1) {
