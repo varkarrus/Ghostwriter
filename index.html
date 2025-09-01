@@ -2358,6 +2358,8 @@
       if (settings.remember_key && settings.openrouter_key) {
         openrouterKey.value = settings.openrouter_key;
         rememberKey.checked = true;
+        // Auto-refresh models when API key is loaded from saved settings
+        refreshAvailableModels();
       } else {
         rememberKey.checked = false;
       }
