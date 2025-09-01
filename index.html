@@ -1429,7 +1429,27 @@
   async function getMeta(fileId) { const res = await fetch(`${DRIVE_FILES_URL}/${fileId}?fields=id,name,modifiedTime`, { headers: authHeader() }); if (res.status === 401) { await refreshToken(); return getMeta(fileId); } if (!res.ok) throw new Error(`Meta failed: ${res.status}`); return await res.json(); }
   async function renameFile(fileId, newName) { const res = await fetch(`${DRIVE_FILES_URL}/${fileId}?fields=id,name,modifiedTime`, { method: "PATCH", headers: { ...authHeader(), "Content-Type": "application/json" }, body: JSON.stringify({ name: newName }) }); if (res.status === 401) { await refreshToken(); return renameFile(fileId, newName); } if (!res.ok) throw new Error(`Rename failed: ${res.status}`); return await res.json(); }
   async function listGhostwriterFiles() { const q = ["mimeType='text/plain'","appProperties has { key='Ghostwriter' and value='1' }"]; const url = new URL(DRIVE_FILES_URL); url.searchParams.set("q", q.join(" and ")); url.searchParams.set("orderBy", "modifiedTime desc"); url.searchParams.set("pageSize", "100"); url.searchParams.set("fields", "files(id,name,modifiedTime)"); const res = await fetch(url.toString(), { headers: authHeader() }); if (res.status === 401) { await refreshToken(); return listGhostwriterFiles(); } if (!res.ok) throw new Error(`List failed: ${res.status}`); const { files } = await res.json(); return files || []; }
-  async function refreshToken(){ return new Promise((resolve) => { tokenClient.callback = () => resolve(); tokenClient.requestAccessToken({ prompt: "" }); }); }
+  async function refreshToken(){ 
+    return new Promise((resolve, reject) => { 
+      const originalCallback = tokenClient.callback;
+      tokenClient.callback = (resp) => {
+        if (resp.error) { 
+          console.error(resp); 
+          setStatus("Auth error."); 
+          tokenClient.callback = originalCallback;
+          reject(new Error(resp.error));
+          return; 
+        }
+        accessToken = resp.access_token;
+        setCookie('ghostwriter_auth', accessToken, 1); // Save for 1 day
+        setStatus("Signed in.");
+        setSignedInUI(true);
+        tokenClient.callback = originalCallback;
+        resolve();
+      };
+      tokenClient.requestAccessToken({ prompt: "" }); 
+    }); 
+  }
 
   // =========================
   //  App actions (now include JSON header)
