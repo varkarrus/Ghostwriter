@@ -357,12 +357,12 @@
         </div>
       </div>
       <div class="row">
-        <label for="max-tokens">Max Output Tokens</label>
-        <input type="number" id="max-tokens" min="1" max="4000" value="1000" />
+        <label for="max-output-tokens">Max Output Tokens</label>
+        <input type="number" id="max-output-tokens" min="1" max="4000" value="1000" />
       </div>
       <div class="row">
-        <label for="max-input-tokens">Max Input Tokens</label>
-        <input type="number" id="max-input-tokens" min="1" max="32000" value="8000" />
+        <label for="max-input-characters">Max Input Characters</label>
+        <input type="number" id="max-input-characters" min="1" max="128000" value="32000" />
       </div>
       <div class="row">
         <label for="temperature">Temperature</label>
@@ -441,7 +441,7 @@
     remember_key: false,
     ai_model: "",
     max_tokens: 1000,
-    max_input_tokens: 8000,
+    max_input_characters: 8000,
     temperature: 0.7,
     top_p: 1.0,
     top_k: 0
@@ -491,8 +491,8 @@
 
   const fixedGenerateBtn = document.getElementById("fixed-generate-btn");
   const cancelGenerateBtn = document.getElementById("cancel-generate-btn");
-  const maxTokensInput = document.getElementById("max-tokens");
-  const maxInputTokensInput = document.getElementById("max-input-tokens");
+  const maxOutputTokensInput = document.getElementById("max-output-tokens");
+  const maxInputCharactersInput = document.getElementById("max-input-characters");
   const temperatureInput = document.getElementById("temperature");
   const topPInput = document.getElementById("top-p");
   const topKInput = document.getElementById("top-k");
@@ -788,8 +788,8 @@
     });
     
     // Other AI settings changes
-    maxTokensInput.addEventListener('input', () => { updateCostEstimate(); markDirty(); });
-    maxInputTokensInput.addEventListener('input', () => { markDirty(); });
+    maxOutputTokensInput.addEventListener('input', () => { updateCostEstimate(); markDirty(); });
+    maxInputCharactersInput.addEventListener('input', () => { markDirty(); });
     topKInput.addEventListener('input', () => { updateCostEstimate(); markDirty(); });
     
     // Auto-refresh models when API key changes
@@ -842,8 +842,8 @@
       openrouter_key: rememberKey.checked ? (openrouterKey.value || "") : "",
       remember_key: !!rememberKey.checked,
       ai_model: aiModel.value || "",
-      max_tokens: parseInt(maxTokensInput.value) || 1000,
-      max_input_tokens: parseInt(maxInputTokensInput.value) || 8000,
+      max_output_tokens: parseInt(maxOutputTokensInput.value) || 1000,
+      max_input_characters: parseInt(maxInputCharactersInput.value) || 32000,
       temperature: parseFloat(temperatureInput.value) || 0.7,
       top_p: parseFloat(topPInput.value) || 1.0,
       top_k: parseInt(topKInput.value) || 0
@@ -856,8 +856,8 @@
     openrouterKey.value = meta.openrouter_key || "";
     rememberKey.checked = !!meta.remember_key;
     aiModel.value = meta.ai_model || "";
-    maxTokensInput.value = meta.max_tokens || 1000;
-    maxInputTokensInput.value = meta.max_input_tokens || 8000;
+    maxOutputTokensInput.value = meta.max_tokens || 1000;
+    maxInputCharactersInput.value = meta.max_input_characters || 32000;
     temperatureInput.value = meta.temperature || 0.7;
     topPInput.value = meta.top_p || 1.0;
     topKInput.value = meta.top_k || 0;
@@ -1011,13 +1011,13 @@
   }
 
   function updateCostEstimate() {
-    if (!aiModel.value || !maxTokensInput.value) {
+    if (!aiModel.value || !maxOutputTokensInput.value) {
       costEstimate.textContent = '~$0.00 per generation';
       return;
     }
     
     // Basic cost estimation (simplified)
-    const tokens = parseInt(maxTokensInput.value) || 1000;
+    const tokens = parseInt(maxOutputTokensInput.value) || 1000;
     const modelCosts = {
       'anthropic/claude-3.5-sonnet': 0.000015,
       'anthropic/claude-3-haiku': 0.00000025,
@@ -1160,7 +1160,7 @@
       
       // Apply max input length limit - keep only recent paragraphs if content is too long
       let limitedContent = currentContent;
-      const maxInputLength = parseInt(maxInputTokensInput.value) || 8000; // Use user-configured limit
+      const maxInputLength = parseInt(maxInputCharactersInput.value) || 32000; // Use user-configured limit
       
       if (currentContent.length > maxInputLength) {
         const paragraphs = currentContent.split(/\n\s*\n/).filter(p => p.trim());
@@ -1218,7 +1218,7 @@
             content: prompt
           }
         ],
-        max_tokens: parseInt(maxTokensInput.value) || 1000,
+        max_tokens: parseInt(maxOutputTokensInput.value) || 1000,
         temperature: parseFloat(temperatureInput.value) || 0.7,
         top_p: parseFloat(topPInput.value) || 1.0
       };
