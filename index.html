@@ -1228,17 +1228,40 @@
       temperatureInput.nextElementSibling.textContent = temperatureInput.value;
       updateCostEstimate();
       markDirty();
+      // Save AI settings after user stops typing
+      clearTimeout(saveAISettingsTimer);
+      saveAISettingsTimer = setTimeout(() => saveAISettings(), 2000);
     });
     topPInput.addEventListener('input', () => {
       topPInput.nextElementSibling.textContent = topPInput.value;
       updateCostEstimate();
       markDirty();
+      // Save AI settings after user stops typing
+      clearTimeout(saveAISettingsTimer);
+      saveAISettingsTimer = setTimeout(() => saveAISettings(), 2000);
     });
     
     // Other AI settings changes
-    maxOutputTokensInput.addEventListener('input', () => { updateCostEstimate(); markDirty(); });
-    maxInputCharactersInput.addEventListener('input', () => { markDirty(); });
-    topKInput.addEventListener('input', () => { updateCostEstimate(); markDirty(); });
+    maxOutputTokensInput.addEventListener('input', () => { 
+      updateCostEstimate(); 
+      markDirty(); 
+      // Save AI settings after user stops typing
+      clearTimeout(saveAISettingsTimer);
+      saveAISettingsTimer = setTimeout(() => saveAISettings(), 2000);
+    });
+    maxInputCharactersInput.addEventListener('input', () => { 
+      markDirty(); 
+      // Save AI settings after user stops typing
+      clearTimeout(saveAISettingsTimer);
+      saveAISettingsTimer = setTimeout(() => saveAISettings(), 2000);
+    });
+    topKInput.addEventListener('input', () => { 
+      updateCostEstimate(); 
+      markDirty(); 
+      // Save AI settings after user stops typing
+      clearTimeout(saveAISettingsTimer);
+      saveAISettingsTimer = setTimeout(() => saveAISettings(), 2000);
+    });
     
     // Auto-refresh models when API key changes
     openrouterKey.addEventListener('input', () => { 
@@ -2121,6 +2144,25 @@
         rememberKey.checked = false;
       }
       
+      // Apply AI parameters
+      if (settings.max_tokens !== undefined) {
+        maxOutputTokensInput.value = settings.max_tokens;
+      }
+      if (settings.max_input_characters !== undefined) {
+        maxInputCharactersInput.value = settings.max_input_characters;
+      }
+      if (settings.temperature !== undefined) {
+        temperatureInput.value = settings.temperature;
+        temperatureInput.nextElementSibling.textContent = settings.temperature;
+      }
+      if (settings.top_p !== undefined) {
+        topPInput.value = settings.top_p;
+        topPInput.nextElementSibling.textContent = settings.top_p;
+      }
+      if (settings.top_k !== undefined) {
+        topKInput.value = settings.top_k;
+      }
+      
       // Apply display preferences
       if (settings.theme) {
         themeSelect.value = settings.theme;
@@ -2194,6 +2236,12 @@
         ai_model: aiModel.value || "",
         remember_key: !!rememberKey.checked,
         openrouter_key: rememberKey.checked ? (openrouterKey.value || "") : "",
+        // AI parameters
+        max_tokens: parseInt(maxOutputTokensInput.value) || 1000,
+        max_input_characters: parseInt(maxInputCharactersInput.value) || 32000,
+        temperature: parseFloat(temperatureInput.value) || 0.7,
+        top_p: parseFloat(topPInput.value) || 1.0,
+        top_k: parseInt(topKInput.value) || 0,
         // Display preferences
         theme: themeSelect.value || "light",
         font_family: fontFamilySelect.value || "mono",
