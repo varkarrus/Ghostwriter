@@ -48,9 +48,39 @@
     main.main { display: grid; grid-template-columns: 1fr; height: 100%; min-height: 0; width: 100%; margin: 0 auto; }
     #editor-wrap, #preview { min-height: 0; }
     #editor { 
-      width: 100%; height: 100%; padding: 16px; border: none; outline: none; resize: none; 
+      width: 100%; height: 100%; padding: 16px; border: none; outline: none; resize: none;
       font: var(--editor-font-size, 14px)/1.6 var(--editor-font-family, 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace);
       max-width: none; background: var(--bg); color: var(--ink);
+      /* Better mobile experience */
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      appearance: none;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+      -webkit-user-select: text;
+      user-select: text;
+      /* Better touch handling on mobile */
+      touch-action: manipulation;
+      /* Prevent zoom on iOS */
+      font-size: max(16px, var(--editor-font-size, 14px));
+    }
+    
+    /* Mobile-specific improvements */
+    @media (max-width: 768px) {
+      #editor {
+        /* Ensure minimum font size to prevent zoom on iOS */
+        font-size: 16px;
+        line-height: 1.5;
+        /* Better spacing on mobile */
+        padding: 20px 16px;
+      }
+    }
+    
+    /* Focus styles for better mobile UX */
+    #editor:focus {
+      outline: none;
+      /* Subtle focus indication */
+      box-shadow: inset 0 0 0 2px rgba(0, 123, 255, 0.25);
     }
     #preview { display:none; padding: 18px; overflow:auto; background: var(--bg); color: var(--ink); border-left: 1px solid var(--line); }
 
@@ -800,8 +830,8 @@
   const createBtn    = document.getElementById("create-file-btn");
   const listBtn      = document.getElementById("list-btn");
   const fileIdInput  = document.getElementById("file-id-input");
-  const editor       = document.getElementById("editor");
-  const statusEl     = document.getElementById("status");
+  const editor = document.getElementById("editor");
+  const statusEl = document.getElementById("status");
   const authStateEl  = document.getElementById("auth-state");
   const activeFileEl = document.getElementById("active-file");
   const listPanel    = document.getElementById("list-panel");
