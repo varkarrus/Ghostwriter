@@ -1120,6 +1120,11 @@
     { id: 'meta-llama/llama-3.1-8b-instruct', name: 'Llama 3.1 8B', pricing: 0.00000006, displayText: 'meta-llama/llama-3.1-8b-instruct - $0.000000/1K tokens' }
   ];
 
+  // Model loading retry state
+  let modelLoadAttempts = 0;
+  let modelLoadRetryTimer = null;
+  let maxModelLoadAttempts = 3;
+
   function setStatus(msg) { statusEl.textContent = msg; }
   function setSaveDot(state) {
     saveDot.classList.remove("saving","saved","idle");
@@ -1504,7 +1509,7 @@
       markDirty(); 
       // Auto-fetch models if key looks valid (longer than 10 chars)
       if (openrouterKey.value.trim().length > 10) {
-        refreshAvailableModels();
+        refreshAvailableModelsWithRetry();
       }
     });
 
@@ -1810,9 +1815,49 @@
       });
       
       setStatus("Models updated successfully.");
+      // Reset retry counter on success
+      modelLoadAttempts = 0;
+      if (modelLoadRetryTimer) {
+        clearTimeout(modelLoadRetryTimer);
+        modelLoadRetryTimer = null;
+      }
     } catch (error) {
       console.error("Failed to fetch models:", error);
       setStatus(`Failed to fetch models: ${error.message}`);
+      throw error; // Re-throw the error so retry mechanism can catch it
+    }
+  }
+
+  async function refreshAvailableModelsWithRetry() {
+    // Clear any existing retry timer
+    if (modelLoadRetryTimer) {
+      clearTimeout(modelLoadRetryTimer);
+      modelLoadRetryTimer = null;
+    }
+
+    if (!openrouterKey.value.trim()) {
+      return; // No API key available, don't start retry loop
+    }
+
+    try {
+      await refreshAvailableModels();
+      // Success - reset attempts counter
+      modelLoadAttempts = 0;
+    } catch (error) {
+      modelLoadAttempts++;
+      
+      if (modelLoadAttempts < maxModelLoadAttempts) {
+        // Schedule retry with exponential backoff: 2^attempt seconds
+        const retryDelay = Math.pow(2, modelLoadAttempts) * 1000;
+        setStatus(`Model loading failed, retrying in ${retryDelay/1000}s... (${modelLoadAttempts}/${maxModelLoadAttempts})`);
+        
+        modelLoadRetryTimer = setTimeout(() => {
+          refreshAvailableModelsWithRetry();
+        }, retryDelay);
+      } else {
+        setStatus(`Failed to load models after ${maxModelLoadAttempts} attempts. Using default models.`);
+        modelLoadAttempts = 0;
+      }
     }
   }
 
@@ -2488,7 +2533,10 @@
         openrouterKey.value = settings.openrouter_key;
         rememberKey.checked = true;
         // Auto-refresh models when API key is loaded from saved settings
-        refreshAvailableModels();
+        // Use setTimeout to ensure DOM is updated before fetching models
+        setTimeout(() => {
+          refreshAvailableModelsWithRetry();
+        }, 100);
       } else {
         rememberKey.checked = false;
       }
