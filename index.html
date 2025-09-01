@@ -2790,8 +2790,18 @@
   }
 
   function showCurrentPage() {
-    if (!isPaginationActive || pageContent.length === 0) {
+    if (!isPaginationActive || !pageContent || pageContent.length === 0) {
       return;
+    }
+
+    // Initialize pagination variables if they're corrupted/undefined
+    if (typeof currentPage !== 'number' || currentPage < 1) {
+      currentPage = 1;
+    }
+
+    // Ensure currentPage is within valid bounds
+    if (currentPage > pageContent.length) {
+      currentPage = pageContent.length;
     }
 
     const content = pageContent[currentPage - 1] || '';
@@ -2810,9 +2820,20 @@
       return;
     }
 
+    // Initialize pagination variables if they're corrupted/undefined
+    if (!pageContent || !Array.isArray(pageContent)) {
+      pageContent = [];
+    }
+    if (typeof currentPage !== 'number' || currentPage < 1) {
+      currentPage = 1;
+    }
+    if (typeof totalPages !== 'number' || totalPages < 1) {
+      totalPages = 1;
+    }
+
     // Get all content by combining pages or current editor content
     let fullContent;
-    if (pageContent.length > 1 && currentPage > 0) {
+    if (pageContent.length > 1 && currentPage > 0 && currentPage <= pageContent.length) {
       // Update current page content
       pageContent[currentPage - 1] = editor.value;
       fullContent = pageContent.join('\n\n');
@@ -2843,6 +2864,14 @@
 
   function navigateToPage(pageNumber) {
     if (pageNumber < 1 || pageNumber > totalPages) return;
+    
+    // Initialize pagination variables if they're corrupted/undefined
+    if (!pageContent || !Array.isArray(pageContent)) {
+      pageContent = [editor.value];
+    }
+    if (typeof currentPage !== 'number' || currentPage < 1) {
+      currentPage = 1;
+    }
     
     // Save current page content
     if (currentPage > 0 && currentPage <= pageContent.length) {
