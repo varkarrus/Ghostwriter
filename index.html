@@ -2751,7 +2751,7 @@
     try {
       setStatus("Creating file…");
       const title = `GhostWriter ${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
-      const combined = buildFileText(readMetaFromUI(), editor.value || "");
+      const combined = buildFileText(readMetaFromUI(), getFullContent() || "");
       const meta = await createTextFile(title, combined);
       setActiveFile(meta.id, meta.name);
       lastRemoteModified = Date.parse(meta.modifiedTime || Date.now());
@@ -2770,6 +2770,12 @@
       const parsed = parseFileText(raw);
       writeMetaToUI(parsed.meta);
       editor.value = parsed.content;
+      
+      // Update pagination state when loading file
+      if (isPaginationActive) {
+        updatePagination();
+      }
+      
       setActiveFile(id, meta.name || "(unknown)");
       lastRemoteModified = Date.parse(meta.modifiedTime || 0);
       startPolling();
@@ -2781,12 +2787,26 @@
 
   function scheduleAutosave(){ clearTimeout(autosaveTimer); autosaveTimer = setTimeout(() => flushSave(), AUTOSAVE_DELAY); }
 
+  // Get the full content, combining all pages when pagination is active
+  function getFullContent() {
+    if (!isPaginationActive || pageContent.length <= 1) {
+      return editor.value;
+    }
+    
+    // Save current page content before combining
+    if (currentPage > 0 && currentPage <= pageContent.length) {
+      pageContent[currentPage - 1] = editor.value;
+    }
+    
+    return pageContent.join('\n\n');
+  }
+
   async function flushSave(opts={}) {
     if (!currentFileId || !accessToken) return;
     if (!dirty && !opts.force) return;
     try {
       isSaving = true; setSaveDot("saving"); if (!opts.silent) setStatus("Saving…");
-      const combined = buildFileText(readMetaFromUI(), editor.value);
+      const combined = buildFileText(readMetaFromUI(), getFullContent());
       const res = await updateTextFile(currentFileId, combined);
       lastRemoteModified = Date.parse(res.modifiedTime || Date.now());
       dirty = false; isSaving = false; setSaveDot("saved"); if (!opts.silent) setStatus("Saved.");
@@ -2811,6 +2831,12 @@
         const parsed = parseFileText(raw);
         writeMetaToUI(parsed.meta);
         editor.value = parsed.content;
+        
+        // Update pagination state when loading remote content
+        if (isPaginationActive) {
+          updatePagination();
+        }
+        
         lastRemoteModified = remoteTs;
         syncNote.textContent = `Updated from Drive at ${new Date().toLocaleTimeString()}`;
         setStatus("Pulled latest changes from Drive.");
