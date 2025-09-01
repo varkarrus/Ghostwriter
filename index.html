@@ -2474,7 +2474,7 @@
       const paragraphWordCount = getWordCount(paragraph);
       
       if (currentWordCount + paragraphWordCount > maxWordsPerPage && currentPage.trim()) {
-        // Start new page
+        // Start new page - trim completed pages
         pages.push(currentPage.trim());
         currentPage = paragraph;
         currentWordCount = paragraphWordCount;
@@ -2487,7 +2487,15 @@
     }
 
     if (currentPage.trim()) {
-      pages.push(currentPage.trim());
+      // For the last page, preserve trailing whitespace by checking original content
+      if (pages.length === 0) {
+        // Single page - preserve original trailing whitespace
+        pages.push(content);
+      } else {
+        // Multiple pages - preserve trailing whitespace on last page
+        const originalTrailingWhitespace = content.match(/\s*$/)?.[0] || '';
+        pages.push(currentPage + originalTrailingWhitespace);
+      }
     }
 
     return pages.length > 0 ? pages : [''];
