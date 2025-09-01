@@ -340,6 +340,16 @@
     .dex-entry-header {
       display: flex;
       justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .remove-dex-entry:hover {
+      background: #c82333 !important;
+    }
+    .dex-entry-header {
+      display: flex;
+      justify-content: space-between;
       align-items: center;
       margin-bottom: 10px;
     }
@@ -978,6 +988,12 @@
 
     window.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave({ silent:true }); });
     window.addEventListener("beforeunload", () => { flushSave({ silent:true }); });
+    
+    // Story Dex event handlers
+    storyDexBtn.addEventListener('click', openStoryDex);
+    storyDexClose.addEventListener('click', closeStoryDex);
+    storyDexModal.querySelector('.story-dex-overlay').addEventListener('click', closeStoryDex);
+    addDexEntryBtn.addEventListener('click', addDexEntry);
   }
 
   // Drawer controller
@@ -1039,6 +1055,10 @@
     // Update range displays
     temperatureInput.nextElementSibling.textContent = temperatureInput.value;
     topPInput.nextElementSibling.textContent = topPInput.value;
+    
+    // Load story dex data
+    currentStoryDex = meta.story_dex || [];
+    renderStoryDex();
     
     updateGenerateButton();
   }
@@ -1476,6 +1496,136 @@
       setGenerationState(false);
       generationController = null;
     }
+  }
+
+  // =========================
+  //  Story Dex Functions
+  // =========================
+  function openStoryDex() {
+    storyDexModal.setAttribute('data-open', '1');
+    renderStoryDex();
+  }
+  
+  function closeStoryDex() {
+    storyDexModal.setAttribute('data-open', '0');
+  }
+  
+  function addDexEntry() {
+    const newEntry = {
+      id: Date.now(), // Simple ID based on timestamp
+      name: '',
+      description: '',
+      keywords: ''
+    };
+    currentStoryDex.push(newEntry);
+    renderStoryDex();
+    markDirty();
+  }
+  
+  function removeDexEntry(id) {
+    currentStoryDex = currentStoryDex.filter(entry => entry.id !== id);
+    renderStoryDex();
+    markDirty();
+  }
+  
+  function updateDexEntry(id, field, value) {
+    const entry = currentStoryDex.find(entry => entry.id === id);
+    if (entry) {
+      entry[field] = value;
+      markDirty();
+    }
+  }
+  
+  function renderStoryDex() {
+    if (!storyDexEntries) return;
+    
+    if (currentStoryDex.length === 0) {
+      storyDexEntries.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No entries yet. Add your first character, location, or concept!</p>';
+      return;
+    }
+    
+    storyDexEntries.innerHTML = currentStoryDex.map(entry => `
+      <div class="dex-entry" data-id="${entry.id}">
+        <div class="dex-entry-header">
+          <input 
+            type="text" 
+            class="dex-entry-name" 
+            placeholder="Name (e.g., Character, Location, Item)"
+            value="${escapeHtml(entry.name || '')}"
+            data-field="name"
+            data-id="${entry.id}"
+            style="
+              font-weight: 600;
+              font-size: 16px;
+              border: none;
+              background: transparent;
+              width: 100%;
+              padding: 4px 0;
+              margin-bottom: 8px;
+            "
+          />
+          <button 
+            class="remove-dex-entry" 
+            data-id="${entry.id}"
+            style="
+              background: #dc3545;
+              color: white;
+              border: none;
+              padding: 4px 8px;
+              border-radius: 4px;
+              cursor: pointer;
+              font-size: 12px;
+            "
+          >Remove</button>
+        </div>
+        <textarea 
+          class="dex-entry-description" 
+          placeholder="Description..."
+          data-field="description"
+          data-id="${entry.id}"
+          style="
+            width: 100%;
+            min-height: 60px;
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 8px;
+            resize: vertical;
+          "
+        >${escapeHtml(entry.description || '')}</textarea>
+        <input 
+          type="text" 
+          class="dex-entry-keywords" 
+          placeholder="Keywords (comma-separated)"
+          value="${escapeHtml(entry.keywords || '')}"
+          data-field="keywords"
+          data-id="${entry.id}"
+          style="
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            padding: 8px;
+            font-size: 14px;
+          "
+        />
+      </div>
+    `).join('');
+    
+    // Add event listeners for the dynamically created elements
+    storyDexEntries.querySelectorAll('.dex-entry-name, .dex-entry-description, .dex-entry-keywords').forEach(input => {
+      input.addEventListener('input', (e) => {
+        const id = parseInt(e.target.dataset.id);
+        const field = e.target.dataset.field;
+        updateDexEntry(id, field, e.target.value);
+      });
+    });
+    
+    storyDexEntries.querySelectorAll('.remove-dex-entry').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const id = parseInt(e.target.dataset.id);
+        removeDexEntry(id);
+      });
+    });
   }
 
   // =========================
