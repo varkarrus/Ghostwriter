@@ -2596,7 +2596,13 @@
       currentPage = 1;
     }
 
-    showCurrentPage();
+    // Only update the display if the editor doesn't have focus to prevent cursor jumping
+    if (document.activeElement !== editor) {
+      showCurrentPage();
+    } else {
+      // Just update the pagination display without changing editor content
+      updatePaginationDisplay();
+    }
   }
 
   function navigateToPage(pageNumber) {
