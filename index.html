@@ -842,6 +842,12 @@
         <input type="number" id="top-k" min="1" max="100" value="0" placeholder="0 = disabled" />
       </div>
       <div class="row">
+        <label>
+          <input type="checkbox" id="clean-ai-output" checked />
+          Clean AI Output
+        </label>
+      </div>
+      <div class="row">
         <label>Estimated Cost</label>
         <div id="cost-estimate" class="pill" style="background:#e8f4fd;border:1px solid #bee5eb;">~$0.00 per generation</div>
       </div>
@@ -1071,6 +1077,7 @@
   const temperatureInput = document.getElementById("temperature");
   const topPInput = document.getElementById("top-p");
   const topKInput = document.getElementById("top-k");
+  const cleanAIOutput = document.getElementById("clean-ai-output");
   const costEstimate = document.getElementById("cost-estimate");
 
   // =========================
@@ -1497,6 +1504,11 @@
       // Save AI settings after user stops typing
       clearTimeout(saveAISettingsTimer);
       saveAISettingsTimer = setTimeout(() => saveAISettings(), 2000);
+    });
+    
+    cleanAIOutput.addEventListener('change', () => { 
+      markDirty(); 
+      saveAISettings(); 
     });
     
     // Auto-refresh models when API key changes
@@ -2133,11 +2145,14 @@
       }
 
       const data = await response.json();
-      const generatedText = data.choices?.[0]?.message?.content?.trim();
+      let generatedText = data.choices?.[0]?.message?.content?.trim();
 
       if (!generatedText) {
         throw new Error("No content generated from AI model.");
       }
+
+      // Clean the AI output if the toggle is enabled
+      generatedText = cleanGeneratedText(generatedText);
 
       // Insert the generated content at the cursor position or end of editor
       const { start, end } = getSelection(editor);
@@ -2197,6 +2212,39 @@
       fixedGenerateBtn.textContent = isGenerating ? 'Generating...' : 'Generate with AI';
       fixedGenerateBtn.title = 'Generate AI content (Ctrl/⌘+G)';
     }
+  }
+
+  // =========================
+  //  AI Output Cleaning Functions
+  // =========================
+  function cleanGeneratedText(text) {
+    if (!cleanAIOutput.checked || !text) {
+      return text;
+    }
+
+    let cleaned = text;
+
+    // 1. Trim unfinished sentences from output
+    // Find the last complete sentence (ending with . ! or ?)
+    const sentences = cleaned.split(/([.!?]+)/);
+    if (sentences.length > 1) {
+      // Check if the last part (after the last punctuation) looks incomplete
+      const lastPart = sentences[sentences.length - 1].trim();
+      // If there's substantial text after the last punctuation, it might be incomplete
+      if (lastPart.length > 0 && lastPart.length < 200 && !lastPart.match(/^[.!?\s]*$/)) {
+        // Remove the incomplete sentence
+        sentences.pop();
+        cleaned = sentences.join('');
+      }
+    }
+
+    // 2. Replace curly quotes with regular quotes
+    cleaned = cleaned.replace(/[""]/g, '"').replace(/['']/g, "'");
+
+    // 3. Delete square brackets and anything contained within them
+    cleaned = cleaned.replace(/\[.*?\]/g, '');
+
+    return cleaned.trim();
   }
 
   // =========================
@@ -2511,6 +2559,9 @@
       if (settings.top_k !== undefined) {
         topKInput.value = settings.top_k;
       }
+      if (settings.clean_ai_output !== undefined) {
+        cleanAIOutput.checked = settings.clean_ai_output;
+      }
       
       // Apply display preferences
       if (settings.theme) {
@@ -2784,6 +2835,7 @@
         temperature: parseFloat(temperatureInput.value) || 0.7,
         top_p: parseFloat(topPInput.value) || 1.0,
         top_k: parseInt(topKInput.value) || 0,
+        clean_ai_output: !!cleanAIOutput.checked,
         // Display preferences
         theme: themeSelect.value || "light",
         font_family: fontFamilySelect.value || "mono",
