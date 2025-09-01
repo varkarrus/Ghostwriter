@@ -48,9 +48,25 @@
     main.main { display: grid; grid-template-columns: 1fr; height: 100%; min-height: 0; width: 100%; margin: 0 auto; }
     #editor-wrap, #preview { min-height: 0; }
     #editor { 
-      width: 100%; height: 100%; padding: 16px; border: none; outline: none; resize: none; 
+      width: 100%; height: 100%; border: none; outline: none; 
       font: var(--editor-font-size, 14px)/1.6 var(--editor-font-family, 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace);
       max-width: none;
+      padding: 16px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      -webkit-user-select: text;
+      user-select: text;
+      min-height: 100px;
+    }
+    /* Better mobile editing experience */
+    #editor:focus {
+      outline: none;
+    }
+    /* Ensure proper text handling on mobile */
+    #editor {
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
     }
     #preview { display:none; padding: 18px; overflow:auto; background:#fff; border-left: 1px solid var(--line); }
 
@@ -567,7 +583,7 @@
 
   <main class="main">
     <div id="editor-wrap">
-      <textarea id="editor" placeholder="Write your story here…"></textarea>
+      <div id="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Write your story here…" data-placeholder="Write your story here…"></div>
     </div>
     <div id="preview" aria-live="polite"></div>
   </main>
@@ -793,7 +809,117 @@
   const createBtn    = document.getElementById("create-file-btn");
   const listBtn      = document.getElementById("list-btn");
   const fileIdInput  = document.getElementById("file-id-input");
-  const editor       = document.getElementById("editor");
+  const editorElement = document.getElementById("editor");
+  
+  // Create adapter to make contenteditable div behave like textarea
+  const editor = {
+    get value() {
+      return editorElement.textContent || '';
+    },
+    set value(text) {
+      editorElement.textContent = text;
+      updatePlaceholder();
+    },
+    addEventListener(event, handler) {
+      if (event === 'input') {
+        editorElement.addEventListener('input', handler);
+      }
+    },
+    get selectionStart() {
+      try {
+        const selection = window.getSelection();
+        if (!selection.rangeCount) return 0;
+        const range = selection.getRangeAt(0);
+        const preCaretRange = range.cloneRange();
+        preCaretRange.selectNodeContents(editorElement);
+        preCaretRange.setEnd(range.startContainer, range.startOffset);
+        return preCaretRange.toString().length;
+      } catch (e) {
+        return 0;
+      }
+    },
+    get selectionEnd() {
+      try {
+        const selection = window.getSelection();
+        if (!selection.rangeCount) return 0;
+        const range = selection.getRangeAt(0);
+        const preCaretRange = range.cloneRange();
+        preCaretRange.selectNodeContents(editorElement);
+        preCaretRange.setEnd(range.endContainer, range.endOffset);
+        return preCaretRange.toString().length;
+      } catch (e) {
+        return 0;
+      }
+    },
+    setSelectionRange(start, end) {
+      try {
+        const textNode = this.getTextNode();
+        if (!textNode) return;
+        
+        const range = document.createRange();
+        const selection = window.getSelection();
+        
+        const textLength = textNode.textContent.length;
+        const safeStart = Math.min(Math.max(start, 0), textLength);
+        const safeEnd = Math.min(Math.max(end, safeStart), textLength);
+        
+        range.setStart(textNode, safeStart);
+        range.setEnd(textNode, safeEnd);
+        
+        selection.removeAllRanges();
+        selection.addRange(range);
+      } catch (e) {
+        console.warn('Selection range error:', e);
+      }
+    },
+    getTextNode() {
+      // Get the first text node, or create one if none exists
+      if (editorElement.firstChild && editorElement.firstChild.nodeType === Node.TEXT_NODE) {
+        return editorElement.firstChild;
+      }
+      // If no text node, create one
+      if (!editorElement.textContent) {
+        const textNode = document.createTextNode('');
+        editorElement.appendChild(textNode);
+        return textNode;
+      }
+      return editorElement.firstChild;
+    },
+    focus() {
+      editorElement.focus();
+    }
+  };
+  
+  // Handle placeholder display
+  function updatePlaceholder() {
+    if (editorElement.textContent.trim() === '') {
+      editorElement.setAttribute('data-empty', 'true');
+    } else {
+      editorElement.removeAttribute('data-empty');
+    }
+  }
+  
+  // Add placeholder styling
+  const placeholderStyle = document.createElement('style');
+  placeholderStyle.textContent = `
+    #editor[data-empty="true"]:before {
+      content: attr(data-placeholder);
+      color: #999;
+      pointer-events: none;
+      position: absolute;
+    }
+    #editor-wrap {
+      position: relative;
+    }
+  `;
+  document.head.appendChild(placeholderStyle);
+  
+  // Initialize placeholder
+  updatePlaceholder();
+  editorElement.addEventListener('input', updatePlaceholder);
+  editorElement.addEventListener('blur', updatePlaceholder);
+  editorElement.addEventListener('focus', updatePlaceholder);
+  
   const statusEl     = document.getElementById("status");
   const authStateEl  = document.getElementById("auth-state");
   const activeFileEl = document.getElementById("active-file");
@@ -1328,10 +1454,34 @@
   // =========================
   //  Formatting helpers (Markdown-in-plaintext)
   // =========================
-  function getSelection(el){ return { start: el.selectionStart, end: el.selectionEnd, value: el.value }; }
-  function setSelection(el, start, end){ el.setSelectionRange(start, end); }
+  function getSelection(el){ 
+    if (el === editor) {
+      try {
+        return { 
+          start: editor.selectionStart || 0, 
+          end: editor.selectionEnd || 0, 
+          value: editor.value 
+        };
+      } catch (e) {
+        console.warn('Selection error:', e);
+        return { start: 0, end: 0, value: editor.value };
+      }
+    }
+    return { start: el.selectionStart, end: el.selectionEnd, value: el.value }; 
+  }
+  function setSelection(el, start, end){ 
+    if (el === editor) {
+      editor.setSelectionRange(start, end);
+    } else {
+      el.setSelectionRange(start, end); 
+    }
+  }
   function markDirty(){ dirty = true; lastInputTs = Date.now(); setSaveDot("saving"); scheduleAutosave(); }
-  function applyChange(newValue, selStart, selEnd){ editor.value = newValue; setSelection(editor, selStart, selEnd); markDirty(); }
+  function applyChange(newValue, selStart, selEnd){ 
+    editor.value = newValue;
+    setSelection(editor, selStart, selEnd);
+    markDirty(); 
+  }
 
   function wrapOrUnwrapSelection(markerL, markerR, { altL = [], altR = [] } = {}){
     const { start, end, value } = getSelection(editor);
