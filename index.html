@@ -1596,7 +1596,7 @@
       openrouter_key: rememberKey.checked ? (openrouterKey.value || "") : "",
       remember_key: !!rememberKey.checked,
       ai_model: aiModel.value || "",
-      max_output_tokens: parseInt(maxOutputTokensInput.value) || 1000,
+      max_tokens: parseInt(maxOutputTokensInput.value) || 1000,
       max_input_characters: parseInt(maxInputCharactersInput.value) || 32000,
       temperature: parseFloat(temperatureInput.value) || 0.7,
       top_p: parseFloat(topPInput.value) || 1.0,
