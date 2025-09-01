@@ -414,6 +414,99 @@
       color: var(--sub);
       font-weight: 500;
     }
+
+    /* ========================= */
+    /* Preview Input Modal */
+    /* ========================= */
+    .preview-input-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1000;
+      display: none;
+    }
+    .preview-input-modal[data-open="1"] {
+      display: block;
+    }
+    .preview-input-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+    }
+    .preview-input-content {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+      width: 90%;
+      max-width: 800px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .preview-input-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px;
+      border-bottom: 1px solid var(--line);
+    }
+    .preview-input-header h2 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .preview-input-close {
+      background: none;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      color: var(--sub);
+    }
+    .preview-input-close:hover {
+      background: var(--muted);
+      color: var(--ink);
+    }
+    .preview-input-body {
+      padding: 20px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .preview-input-info {
+      margin-bottom: 15px;
+      font-size: 14px;
+      color: var(--sub);
+      padding: 12px;
+      background: var(--muted);
+      border-radius: 6px;
+    }
+    .preview-input-text {
+      background: #f8f9fa;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      max-height: 50vh;
+      overflow-y: auto;
+    }
   </style>
 </head>
 <body data-mode="edit">
@@ -559,6 +652,9 @@
         <div id="cost-estimate" class="pill" style="background:#e8f4fd;border:1px solid #bee5eb;">~$0.00 per generation</div>
       </div>
       <div class="row" style="margin-top:20px;padding-top:20px;border-top:1px solid var(--line);">
+        <button id="preview-input-btn" style="width:100%;padding:10px;background:#f8f9fa;border:1px solid var(--line);border-radius:8px;cursor:pointer;margin-bottom:15px;">
+          Preview Input
+        </button>
         <div style="font-size:12px;color:#666;text-align:center;">
           Use the blue "Generate with AI" button at the bottom-right corner to generate content.
         </div>
@@ -601,6 +697,25 @@
       </div>
       <div id="story-dex-entries" class="story-dex-entries">
         <!-- Entries will be populated here -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Preview Input Modal -->
+<div id="preview-input-modal" class="preview-input-modal" data-open="0">
+  <div class="preview-input-overlay"></div>
+  <div class="preview-input-content">
+    <div class="preview-input-header">
+      <h2>AI Input Preview</h2>
+      <button id="preview-input-close" class="preview-input-close">&times;</button>
+    </div>
+    <div class="preview-input-body">
+      <div class="preview-input-info">
+        This is the exact text that would be sent to the AI model:
+      </div>
+      <div id="preview-input-text" class="preview-input-text">
+        <!-- Preview text will be populated here -->
       </div>
     </div>
   </div>
@@ -688,6 +803,11 @@
   const addDexEntryBtn = document.getElementById("add-dex-entry");
   const storyDexEntries = document.getElementById("story-dex-entries");
   
+  const previewInputBtn = document.getElementById("preview-input-btn");
+  const previewInputModal = document.getElementById("preview-input-modal");
+  const previewInputClose = document.getElementById("preview-input-close");
+  const previewInputText = document.getElementById("preview-input-text");
+  
   const openrouterKey = document.getElementById("openrouter-key");
   const rememberKey  = document.getElementById("remember-key");
   const aiModel      = document.getElementById("ai-model");
@@ -724,6 +844,7 @@
   // Generation state
   let isGenerating = false;
   let generationController = null; // AbortController for canceling requests
+  let isCtrlHeld = false; // Track if CTRL key is being held
   
   // Current active tab
   let activeTab = 'story';
@@ -902,6 +1023,14 @@
     window.addEventListener("keydown", (e) => {
       const isMac = navigator.platform.toLowerCase().includes("mac");
       const primary = isMac ? e.metaKey : e.ctrlKey;
+      
+      // Track CTRL state for Generate button
+      const newCtrlState = isMac ? e.metaKey : e.ctrlKey;
+      if (newCtrlState !== isCtrlHeld) {
+        isCtrlHeld = newCtrlState;
+        updateGenerateButtonForCtrl();
+      }
+      
       if (primary && e.key.toLowerCase() === "s") { e.preventDefault(); flushSave(); return; }
       if (primary && e.key.toLowerCase() === "b") { e.preventDefault(); toggleBold(); return; }
       if (primary && e.key.toLowerCase() === "i") { e.preventDefault(); toggleItalic(); return; }
@@ -924,6 +1053,16 @@
         const { start, end } = getSelection(editor);
         const lines = getSelectedLineRange(editor.value, start, end);
         if (lines.text.match(/^(\-\s|\s*)/m)) { e.preventDefault(); if (e.shiftKey) outdentSelection(); else indentSelection(); }
+      }
+    });
+    
+    // Track CTRL key release for Generate button
+    window.addEventListener("keyup", (e) => {
+      const isMac = navigator.platform.toLowerCase().includes("mac");
+      const newCtrlState = isMac ? e.metaKey : e.ctrlKey;
+      if (newCtrlState !== isCtrlHeld) {
+        isCtrlHeld = newCtrlState;
+        updateGenerateButtonForCtrl();
       }
     });
 
@@ -979,7 +1118,13 @@
     bindTabEvents();
 
     // Fixed generate button
-    fixedGenerateBtn.addEventListener('click', () => generateAIContent());
+    fixedGenerateBtn.addEventListener('click', () => {
+      if (isCtrlHeld) {
+        openPreviewInput();
+      } else {
+        generateAIContent();
+      }
+    });
     cancelGenerateBtn.addEventListener('click', () => cancelGeneration());
 
     // Range input updates
@@ -1016,6 +1161,11 @@
     storyDexClose.addEventListener('click', closeStoryDex);
     storyDexModal.querySelector('.story-dex-overlay').addEventListener('click', closeStoryDex);
     addDexEntryBtn.addEventListener('click', addDexEntry);
+    
+    // Preview Input event handlers
+    previewInputBtn.addEventListener('click', openPreviewInput);
+    previewInputClose.addEventListener('click', closePreviewInput);
+    previewInputModal.querySelector('.preview-input-overlay').addEventListener('click', closePreviewInput);
   }
 
   // Drawer controller
@@ -1330,7 +1480,7 @@
     
     // Update UI elements
     fixedGenerateBtn.classList.toggle('generating', generating);
-    fixedGenerateBtn.textContent = generating ? 'Generating...' : 'Generate with AI';
+    updateGenerateButtonForCtrl(); // Use our function that considers CTRL state
     fixedGenerateBtn.disabled = generating;
     
     cancelGenerateBtn.classList.toggle('visible', generating);
@@ -1395,23 +1545,8 @@
     return matchedEntries;
   }
 
-  async function generateAIContent() {
-    if (!openrouterKey.value.trim() || !aiModel.value.trim()) {
-      setStatus("Please enter OpenRouter API key and select a model.");
-      return;
-    }
-
-    if (isGenerating) {
-      setStatus("Generation already in progress.");
-      return;
-    }
-
-    try {
-      generationController = new AbortController();
-      setGenerationState(true);
-      setStatus("Generating AI content...");
-
-      // Get the current editor content
+  function buildAIPrompt() {
+    // Get the current editor content
       const currentContent = editor.value || "";
       
       // Apply max input length limit - keep only recent paragraphs if content is too long
@@ -1544,6 +1679,28 @@
         }
       }
 
+      return prompt;
+  }
+
+  async function generateAIContent() {
+    if (!openrouterKey.value.trim() || !aiModel.value.trim()) {
+      setStatus("Please enter OpenRouter API key and select a model.");
+      return;
+    }
+
+    if (isGenerating) {
+      setStatus("Generation already in progress.");
+      return;
+    }
+
+    try {
+      generationController = new AbortController();
+      setGenerationState(true);
+      setStatus("Generating AI content...");
+
+      // Build the prompt using the extracted function
+      const prompt = buildAIPrompt();
+
       // Build request body with enhanced settings
       const requestBody = {
         model: aiModel.value,
@@ -1636,6 +1793,35 @@
     } finally {
       setGenerationState(false);
       generationController = null;
+    }
+  }
+
+  // =========================
+  //  Preview Input Functions
+  // =========================
+  function openPreviewInput() {
+    try {
+      const prompt = buildAIPrompt();
+      previewInputText.textContent = prompt;
+      previewInputModal.setAttribute('data-open', '1');
+    } catch (error) {
+      console.error("Error building preview:", error);
+      previewInputText.textContent = "Error building prompt: " + error.message;
+      previewInputModal.setAttribute('data-open', '1');
+    }
+  }
+  
+  function closePreviewInput() {
+    previewInputModal.setAttribute('data-open', '0');
+  }
+  
+  function updateGenerateButtonForCtrl() {
+    if (isCtrlHeld && !isGenerating) {
+      fixedGenerateBtn.textContent = 'Preview Input';
+      fixedGenerateBtn.title = 'Preview AI input (Ctrl/⌘+G)';
+    } else {
+      fixedGenerateBtn.textContent = isGenerating ? 'Generating...' : 'Generate with AI';
+      fixedGenerateBtn.title = 'Generate AI content (Ctrl/⌘+G)';
     }
   }
 
