@@ -207,21 +207,53 @@
     #meta-scrim[data-open="1"] { opacity: 1; pointer-events: auto; }
 
     /* Side tab button */
-    #meta-tab {
-      position: fixed; right: 0; top: 50%; transform: translate(50%, -50%);
-      writing-mode: vertical-rl; text-orientation: mixed;
-      background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-right: none; border-radius: 10px 0 0 10px;
-      padding: 10px 8px; font-size: 12px; cursor: pointer; z-index: 60;
-      box-shadow: -4px 4px 12px rgba(0,0,0,0.06);
-    }
     #meta-tab[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
 
     /* Responsive niceties */
     @media (max-width: 480px) {
       :root { --meta-w: 92vw; }
-      #meta-tab { top: auto; bottom: 18px; transform: translate(50%, 0); writing-mode: horizontal-tb; }
+      /* Hide Split button on mobile */
+      #toggle-split { display: none; }
+      /* Position Settings button in toolbar area on mobile */
+      #meta-tab { 
+        position: fixed;
+        top: 147px; /* Position after toolbar */
+        right: 8px;
+        transform: none; 
+        writing-mode: horizontal-tb; 
+        border: 1px solid var(--line); 
+        border-radius: 10px; 
+        padding: 8px 10px; 
+        font-size: 14px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        z-index: 60;
+        background: var(--bg);
+        color: var(--ink);
+      }
       /* Move Generate button to bottom left on mobile to avoid covering settings button */
       #fixed-generate-btn { left: 20px; right: auto; }
+    }
+
+    /* Desktop styles for settings button - keep original positioning */
+    @media (min-width: 481px) {
+      #meta-tab {
+        position: fixed; 
+        right: 0; 
+        top: 50%; 
+        transform: translate(50%, -50%);
+        writing-mode: vertical-rl; 
+        text-orientation: mixed;
+        background: var(--bg); 
+        color: var(--ink); 
+        border: 1px solid var(--line); 
+        border-right: none; 
+        border-radius: 10px 0 0 10px;
+        padding: 10px 8px; 
+        font-size: 12px; 
+        cursor: pointer; 
+        z-index: 60;
+        box-shadow: -4px 4px 12px rgba(0,0,0,0.06);
+      }
     }
 
     /* Fixed Generate Button */
