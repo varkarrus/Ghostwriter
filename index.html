@@ -6,8 +6,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <!-- Google Identity Services (OAuth in browser) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <!-- Paged.js for pagination functionality -->
-  <script src="https://unpkg.com/pagedjs/dist/paged.polyfill.js"></script>
   <style>
     :root { 
       --bg:#ffffff; --muted:#f6f6f6; --line:#e8e8e8; --ink:#111; --sub:#555; --meta-w: 380px; 
@@ -116,53 +114,6 @@
     #preview ul { margin: 0.5em 0 0.5em 1.2em; }
     #preview li { margin: 0.25em 0; }
 
-    /* Pagination styles */
-    #preview.paged {
-      overflow: auto;
-      height: auto;
-    }
-
-    /* CSS-based pagination fallback */
-    #preview.paged {
-      column-fill: auto;
-      column-break-inside: avoid;
-    }
-
-    #preview.paged h1, #preview.paged h2, #preview.paged h3 {
-      break-after: avoid;
-      column-break-after: avoid;
-    }
-
-    #preview.paged p {
-      break-inside: avoid;
-      column-break-inside: avoid;
-    }
-
-    /* Paged.js page styles (when library loads successfully) */
-    .pagedjs_page {
-      margin: 1rem auto;
-      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-      background: var(--bg);
-      border: 1px solid var(--line);
-    }
-
-    /* Dark theme pagination adjustments */
-    [data-theme="dark"] .pagedjs_page {
-      box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
-    }
-
-    /* Page content area */
-    .pagedjs_page_content {
-      background: var(--bg);
-      color: var(--ink);
-    }
-
-    /* Pagination controls and page numbers */
-    .pagedjs_margin {
-      background: var(--bg);
-      color: var(--sub);
-    }
-
     .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; background: #eee; font-size: 12px; }
     a { color: inherit; }
     code.kbd { padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fbfbfb; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
@@ -244,7 +195,6 @@
     #meta-body button.generating { background: #f0f8ff; border-color: #4a90e2; }
     #next-enable-wrap { display:flex; align-items:center; justify-content:flex-end; gap: 8px; }
     .range-value { font-size: 12px; color: var(--sub); margin-left: 8px; }
-    .checkbox-group { display: flex; align-items: center; gap: 6px; }
 
     /* Panel footer */
     #meta-foot { padding: 8px 12px; border-top: 1px solid var(--line); font-size:12px; color: var(--sub); display:flex; justify-content: space-between; align-items:center; gap: 8px; }
@@ -855,13 +805,6 @@
         <input type="range" id="font-size-mobile" min="12" max="20" step="1" value="14" />
         <span class="range-value">14px</span>
       </div>
-      <div class="row">
-        <label>Enable Pagination</label>
-        <div class="checkbox-group">
-          <input type="checkbox" id="enable-pagination" />
-          <label for="enable-pagination">Apply pagination to preview mode</label>
-        </div>
-      </div>
 
     </div>
   </div>
@@ -994,7 +937,6 @@
   const fontSizeMobile  = document.getElementById("font-size-mobile");
   const desktopFontRow  = document.getElementById("desktop-font-row");
   const mobileFontRow   = document.getElementById("mobile-font-row");
-  const enablePagination= document.getElementById("enable-pagination");
   
 
   
@@ -1251,10 +1193,6 @@
     });
     fontSizeMobile.addEventListener("change", () => { 
       saveAISettings(); 
-    });
-    enablePagination.addEventListener("change", () => {
-      applyPagination(enablePagination.checked);
-      saveAISettings();
     });
 
 
@@ -1648,13 +1586,7 @@
     return sanitizeHTML(html); 
   }
   function sanitizeHTML(html){ const allowed = new Set(['H1','H2','H3','H4','H5','H6','P','STRONG','EM','U','UL','LI','BR']); const tmp = document.createElement('div'); tmp.innerHTML = html; (function walk(node){ const children = Array.from(node.childNodes); for (const child of children){ if (child.nodeType === 1){ if (!allowed.has(child.tagName)){ while (child.firstChild) node.insertBefore(child.firstChild, child); node.removeChild(child); continue; } const attrs = Array.from(child.attributes); for (const a of attrs) child.removeAttribute(a.name); walk(child); } } })(tmp); return tmp.innerHTML; }
-  function updatePreview() { 
-    previewEl.innerHTML = renderMarkdown(editor.value || ''); 
-    // Re-apply pagination if enabled
-    if (enablePagination.checked) {
-      applyPagination(true);
-    }
-  }
+  function updatePreview(){ previewEl.innerHTML = renderMarkdown(editor.value || ''); }
 
   // =========================
   //  AI Helper Functions
@@ -2538,10 +2470,6 @@
         fontSizeMobile.value = settings.font_size_mobile;
         updateFontSizeDisplay(fontSizeMobile);
       }
-      if (settings.enable_pagination !== undefined) {
-        enablePagination.checked = settings.enable_pagination;
-        applyPagination(settings.enable_pagination);
-      }
       
       // Apply current font size based on screen size
       applyFontSize();
@@ -2594,93 +2522,7 @@
   //  Pagination Helpers
   // =========================
 
-  function applyPagination(enabled) {
-    const preview = document.getElementById('preview');
-    
-    if (enabled) {
-      // Add paged class to enable pagination
-      preview.classList.add('paged');
-      
-      // Try to use Paged.js if available
-      if (window.PagedPolyfill && typeof window.PagedPolyfill.preview === 'function') {
-        try {
-          window.PagedPolyfill.preview(preview);
-        } catch (error) {
-          console.warn('Paged.js failed to initialize:', error);
-          // Fallback to CSS-based pagination
-          applyCSStPagination(preview);
-        }
-      } else {
-        console.warn('Paged.js not loaded, using CSS fallback pagination');
-        // Fallback to CSS-based pagination
-        applyCSStPagination(preview);
-      }
-    } else {
-      // Remove paged class to disable pagination
-      preview.classList.remove('paged');
-      
-      // Reset any pagination styling
-      resetPaginationStyling(preview);
-    }
-  }
 
-  function applyCSStPagination(preview) {
-    // Simple CSS-based pagination fallback
-    preview.style.columnCount = 'auto';
-    preview.style.columnWidth = '400px';
-    preview.style.columnGap = '40px';
-    preview.style.height = '80vh';
-    preview.style.overflow = 'hidden auto';
-  }
-
-  function resetPaginationStyling(preview) {
-    // Reset any paged.js modifications and CSS pagination
-    if (preview) {
-      preview.style.columnCount = '';
-      preview.style.columnWidth = '';
-      preview.style.columnGap = '';
-      preview.style.height = '';
-      preview.style.overflow = 'auto';
-    }
-  }
-
-  function jumpToLastPageAndScrollToBottom() {
-    // This function is called after AI generation
-    // If pagination is enabled, we should jump to the last page
-    // Otherwise, just scroll to bottom normally
-    
-    const preview = document.getElementById('preview');
-    const editor = document.getElementById('editor');
-    
-    // First scroll the editor to bottom
-    editor.scrollTop = editor.scrollHeight;
-    
-    // If we're in preview or split mode and pagination is enabled
-    if (enablePagination.checked && (document.body.getAttribute('data-mode') === 'preview' || document.body.getAttribute('data-mode') === 'split')) {
-      // Use a timeout to allow any pagination rendering to finish
-      setTimeout(() => {
-        // Try to find Paged.js pages first
-        const pages = preview.querySelectorAll('.pagedjs_page');
-        if (pages.length > 0) {
-          const lastPage = pages[pages.length - 1];
-          lastPage.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        } else {
-          // Fallback: scroll to bottom of preview for CSS pagination
-          preview.scrollTop = preview.scrollHeight;
-          
-          // For CSS column pagination, scroll to the rightmost column
-          if (preview.style.columnCount || preview.style.columnWidth) {
-            preview.scrollLeft = preview.scrollWidth - preview.clientWidth;
-          }
-        }
-      }, 500);
-    } else {
-      // Normal scroll behavior for preview
-      if (preview) {
-        preview.scrollTop = preview.scrollHeight;
-      }
-    }
-  }
 
 
   async function saveAISettings() {
@@ -2703,7 +2545,6 @@
         font_family: fontFamilySelect.value || "mono",
         font_size_desktop: parseInt(fontSizeDesktop.value) || 14,
         font_size_mobile: parseInt(fontSizeMobile.value) || 14,
-        enable_pagination: !!enablePagination.checked,
         last_updated: new Date().toISOString()
       };
       
