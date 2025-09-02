@@ -989,6 +989,10 @@
   let aiSettingsLoaded = false; // whether we've attempted to load AI settings
   let saveAISettingsTimer = null; // timer for delayed AI settings save
   
+  // Auth refresh state
+  let isRefreshingToken = false; // flag to prevent concurrent refresh attempts
+  let allowBackgroundRefresh = false; // whether background operations can trigger auth popups
+  
   // Generation state
   let isGenerating = false;
   let generationController = null; // AbortController for canceling requests
@@ -1081,10 +1085,21 @@
     return () => {
       if (!accessToken) {
         setStatus(`Requesting permission for ${action}…`);
+        allowBackgroundRefresh = true; // Allow refresh for user actions
         tokenClient.requestAccessToken({ prompt: "consent" });
         return;
       }
-      fn();
+      // Enable background refresh for the duration of this user action
+      const oldAllowBackgroundRefresh = allowBackgroundRefresh;
+      allowBackgroundRefresh = true;
+      try {
+        fn();
+      } finally {
+        // Restore previous setting after a short delay
+        setTimeout(() => {
+          allowBackgroundRefresh = oldAllowBackgroundRefresh;
+        }, 5000);
+      }
     };
   }
 
@@ -1111,7 +1126,11 @@
   }
 
   function wireEvents() {
-    document.getElementById("auth-btn").addEventListener("click", () => { setStatus("Opening Google sign-in…"); tokenClient.requestAccessToken({ prompt: "consent" }); });
+    document.getElementById("auth-btn").addEventListener("click", () => { 
+      setStatus("Opening Google sign-in…"); 
+      allowBackgroundRefresh = true; // Allow refresh for manual sign-in
+      tokenClient.requestAccessToken({ prompt: "consent" }); 
+    });
     signoutBtn.addEventListener("click", () => {
       if (accessToken) {
         stopPolling();
@@ -1215,7 +1234,7 @@
         updateGenerateButtonForCtrl();
       }
       
-      if (primary && e.key.toLowerCase() === "s") { e.preventDefault(); flushSave(); return; }
+      if (primary && e.key.toLowerCase() === "s") { e.preventDefault(); flushSave({ isUserAction: true }); return; }
       if (primary && e.key.toLowerCase() === "b") { e.preventDefault(); toggleBold(); return; }
       if (primary && e.key.toLowerCase() === "i") { e.preventDefault(); toggleItalic(); return; }
       if (primary && e.key.toLowerCase() === "u") { e.preventDefault(); toggleUnderline(); return; }
@@ -1284,7 +1303,7 @@
     bindPreviewEvents();
 
     // Save button in drawer
-    metaSaveNow.addEventListener('click', () => flushSave());
+    metaSaveNow.addEventListener('click', () => flushSave({ isUserAction: true }));
 
 
 
@@ -2379,7 +2398,7 @@
   // =========================
   //  AI Settings Persistence (Google Drive AppData)
   // =========================
-  async function findAISettingsFile() {
+  async function findAISettingsFile(isUserAction = false) {
     try {
       const url = new URL(DRIVE_FILES_URL);
       url.searchParams.set("q", `name='${AI_SETTINGS_FILENAME}' and parents in 'appdata'`);
@@ -2387,7 +2406,7 @@
       url.searchParams.set("fields", "files(id,name)");
       
       const res = await fetch(url.toString(), { headers: authHeader() });
-      if (res.status === 401) { await refreshToken(); return findAISettingsFile(); }
+      if (res.status === 401) { await handleUnauthorized(isUserAction); return findAISettingsFile(isUserAction); }
       if (!res.ok) throw new Error(`Find AI settings failed: ${res.status}`);
       
       const { files } = await res.json();
@@ -2398,18 +2417,18 @@
     }
   }
 
-  async function loadAISettings() {
+  async function loadAISettings(isUserAction = false) {
     if (!accessToken || aiSettingsLoaded) return;
     
     try {
-      aiSettingsFileId = await findAISettingsFile();
+      aiSettingsFileId = await findAISettingsFile(isUserAction);
       if (!aiSettingsFileId) {
         aiSettingsLoaded = true;
         return; // No settings file exists yet
       }
 
       const res = await fetch(`${DRIVE_FILES_URL}/${aiSettingsFileId}?alt=media`, { headers: authHeader() });
-      if (res.status === 401) { await refreshToken(); return loadAISettings(); }
+      if (res.status === 401) { await handleUnauthorized(isUserAction); return loadAISettings(isUserAction); }
       if (!res.ok) throw new Error(`Load AI settings failed: ${res.status}`);
       
       const settingsText = await res.text();
@@ -2525,7 +2544,7 @@
 
 
 
-  async function saveAISettings() {
+  async function saveAISettings(isUserAction = true) {
     if (!accessToken) return;
     
     try {
@@ -2557,7 +2576,7 @@
           headers: { ...authHeader(), "Content-Type": "application/json; charset=UTF-8" },
           body: settingsJson
         });
-        if (res.status === 401) { await refreshToken(); return saveAISettings(); }
+        if (res.status === 401) { await handleUnauthorized(isUserAction); return saveAISettings(isUserAction); }
         if (!res.ok) throw new Error(`Update AI settings failed: ${res.status}`);
       } else {
         // Create new file in appdata folder
@@ -2580,7 +2599,7 @@
           headers: { ...authHeader(), "Content-Type": `multipart/related; boundary=${boundary}` },
           body
         });
-        if (res.status === 401) { await refreshToken(); return saveAISettings(); }
+        if (res.status === 401) { await handleUnauthorized(isUserAction); return saveAISettings(isUserAction); }
         if (!res.ok) throw new Error(`Create AI settings failed: ${res.status}`);
         
         const result = await res.json();
@@ -2597,18 +2616,40 @@
   //  Drive helpers (fetch)
   // =========================
   function authHeader() { return { Authorization: `Bearer ${accessToken}` }; }
-  async function createTextFile(name, text) { const boundary = "-------Ghostwriter-" + Math.random().toString(36).slice(2); const metadata = { name, mimeType: "text/plain", appProperties: { Ghostwriter: "1" } }; const body = `--${boundary}\r\n` + `Content-Type: application/json; charset=UTF-8\r\n\r\n` + JSON.stringify(metadata) + `\r\n` + `--${boundary}\r\n` + `Content-Type: text/plain; charset=UTF-8\r\n\r\n` + (text || "") + `\r\n` + `--${boundary}--`; const res = await fetch(`${DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,webViewLink,modifiedTime`, { method: "POST", headers: { ...authHeader(), "Content-Type": `multipart/related; boundary=${boundary}` }, body }); if (res.status === 401) { await refreshToken(); return createTextFile(name, text); } if (!res.ok) throw new Error(`Create failed: ${res.status}`); return await res.json(); }
-  async function updateTextFile(fileId, text) { const res = await fetch(`${DRIVE_UPLOAD_URL}/${fileId}?uploadType=media&fields=id,name,modifiedTime,webViewLink`, { method: "PATCH", headers: { ...authHeader(), "Content-Type": "text/plain; charset=UTF-8" }, body: text || "" }); if (res.status === 401) { await refreshToken(); return updateTextFile(fileId, text); } if (!res.ok) throw new Error(`Update failed: ${res.status}`); return await res.json(); }
-  async function downloadTextFile(fileId) { const res = await fetch(`${DRIVE_FILES_URL}/${fileId}?alt=media`, { headers: authHeader() }); if (res.status === 401) { await refreshToken(); return downloadTextFile(fileId); } if (!res.ok) throw new Error(`Download failed: ${res.status}`); return await res.text(); }
-  async function getMeta(fileId) { const res = await fetch(`${DRIVE_FILES_URL}/${fileId}?fields=id,name,modifiedTime`, { headers: authHeader() }); if (res.status === 401) { await refreshToken(); return getMeta(fileId); } if (!res.ok) throw new Error(`Meta failed: ${res.status}`); return await res.json(); }
-  async function renameFile(fileId, newName) { const res = await fetch(`${DRIVE_FILES_URL}/${fileId}?fields=id,name,modifiedTime`, { method: "PATCH", headers: { ...authHeader(), "Content-Type": "application/json" }, body: JSON.stringify({ name: newName }) }); if (res.status === 401) { await refreshToken(); return renameFile(fileId, newName); } if (!res.ok) throw new Error(`Rename failed: ${res.status}`); return await res.json(); }
-  async function listGhostwriterFiles() { const q = ["mimeType='text/plain'","appProperties has { key='Ghostwriter' and value='1' }"]; const url = new URL(DRIVE_FILES_URL); url.searchParams.set("q", q.join(" and ")); url.searchParams.set("orderBy", "modifiedTime desc"); url.searchParams.set("pageSize", "100"); url.searchParams.set("fields", "files(id,name,modifiedTime)"); const res = await fetch(url.toString(), { headers: authHeader() }); if (res.status === 401) { await refreshToken(); return listGhostwriterFiles(); } if (!res.ok) throw new Error(`List failed: ${res.status}`); const { files } = await res.json(); return files || []; }
-  async function refreshToken(){ 
+  async function createTextFile(name, text, isUserAction = true) { const boundary = "-------Ghostwriter-" + Math.random().toString(36).slice(2); const metadata = { name, mimeType: "text/plain", appProperties: { Ghostwriter: "1" } }; const body = `--${boundary}\r\n` + `Content-Type: application/json; charset=UTF-8\r\n\r\n` + JSON.stringify(metadata) + `\r\n` + `--${boundary}\r\n` + `Content-Type: text/plain; charset=UTF-8\r\n\r\n` + (text || "") + `\r\n` + `--${boundary}--`; const res = await fetch(`${DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,webViewLink,modifiedTime`, { method: "POST", headers: { ...authHeader(), "Content-Type": `multipart/related; boundary=${boundary}` }, body }); if (res.status === 401) { await handleUnauthorized(isUserAction); return createTextFile(name, text, isUserAction); } if (!res.ok) throw new Error(`Create failed: ${res.status}`); return await res.json(); }
+  async function updateTextFile(fileId, text, isUserAction = true) { const res = await fetch(`${DRIVE_UPLOAD_URL}/${fileId}?uploadType=media&fields=id,name,modifiedTime,webViewLink`, { method: "PATCH", headers: { ...authHeader(), "Content-Type": "text/plain; charset=UTF-8" }, body: text || "" }); if (res.status === 401) { await handleUnauthorized(isUserAction); return updateTextFile(fileId, text, isUserAction); } if (!res.ok) throw new Error(`Update failed: ${res.status}`); return await res.json(); }
+  async function downloadTextFile(fileId, isUserAction = true) { const res = await fetch(`${DRIVE_FILES_URL}/${fileId}?alt=media`, { headers: authHeader() }); if (res.status === 401) { await handleUnauthorized(isUserAction); return downloadTextFile(fileId, isUserAction); } if (!res.ok) throw new Error(`Download failed: ${res.status}`); return await res.text(); }
+  async function getMeta(fileId, isUserAction = true) { const res = await fetch(`${DRIVE_FILES_URL}/${fileId}?fields=id,name,modifiedTime`, { headers: authHeader() }); if (res.status === 401) { await handleUnauthorized(isUserAction); return getMeta(fileId, isUserAction); } if (!res.ok) throw new Error(`Meta failed: ${res.status}`); return await res.json(); }
+  async function renameFile(fileId, newName, isUserAction = true) { const res = await fetch(`${DRIVE_FILES_URL}/${fileId}?fields=id,name,modifiedTime`, { method: "PATCH", headers: { ...authHeader(), "Content-Type": "application/json" }, body: JSON.stringify({ name: newName }) }); if (res.status === 401) { await handleUnauthorized(isUserAction); return renameFile(fileId, newName, isUserAction); } if (!res.ok) throw new Error(`Rename failed: ${res.status}`); return await res.json(); }
+  async function listGhostwriterFiles(isUserAction = true) { const q = ["mimeType='text/plain'","appProperties has { key='Ghostwriter' and value='1' }"]; const url = new URL(DRIVE_FILES_URL); url.searchParams.set("q", q.join(" and ")); url.searchParams.set("orderBy", "modifiedTime desc"); url.searchParams.set("pageSize", "100"); url.searchParams.set("fields", "files(id,name,modifiedTime)"); const res = await fetch(url.toString(), { headers: authHeader() }); if (res.status === 401) { await handleUnauthorized(isUserAction); return listGhostwriterFiles(isUserAction); } if (!res.ok) throw new Error(`List failed: ${res.status}`); const { files } = await res.json(); return files || []; }
+  async function refreshToken(isUserAction = false){ 
+    // Prevent concurrent refresh attempts
+    if (isRefreshingToken) {
+      throw new Error("Token refresh already in progress");
+    }
+    
+    // Only allow popups for user actions or when background refresh is explicitly allowed
+    if (!isUserAction && !allowBackgroundRefresh) {
+      // Clear invalid token and show signed out state
+      accessToken = null;
+      deleteCookie('ghostwriter_auth');
+      setSignedInUI(false);
+      setStatus("Session expired. Please sign in again.");
+      throw new Error("Session expired - background refresh not allowed");
+    }
+    
+    isRefreshingToken = true;
+    
     return new Promise((resolve, reject) => { 
       const originalCallback = tokenClient.callback;
       tokenClient.callback = (resp) => {
+        isRefreshingToken = false;
         if (resp.error) { 
           console.error(resp); 
+          // Clear invalid token and show signed out state
+          accessToken = null;
+          deleteCookie('ghostwriter_auth');
+          setSignedInUI(false);
           setStatus("Auth error."); 
           tokenClient.callback = originalCallback;
           reject(new Error(resp.error));
@@ -2625,6 +2666,21 @@
     }); 
   }
 
+  // Helper function for handling 401 errors in background operations
+  async function handleUnauthorized(isUserAction = false) {
+    if (isUserAction) {
+      // For user actions, attempt to refresh the token
+      return await refreshToken(true);
+    } else {
+      // For background operations, silently fail and clear token
+      accessToken = null;
+      deleteCookie('ghostwriter_auth');
+      setSignedInUI(false);
+      setStatus("Session expired. Please sign in again.");
+      throw new Error("Session expired");
+    }
+  }
+
   // =========================
   //  App actions (now include JSON header)
   // =========================
@@ -2633,7 +2689,7 @@
       setStatus("Creating file…");
       const title = `GhostWriter ${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
       const combined = buildFileText(readMetaFromUI(), getFullContent() || "");
-      const meta = await createTextFile(title, combined);
+      const meta = await createTextFile(title, combined, true); // user action
       setActiveFile(meta.id, meta.name);
       lastRemoteModified = Date.parse(meta.modifiedTime || Date.now());
       startPolling();
@@ -2646,8 +2702,8 @@
   async function loadFile(id) {
     try {
       setStatus("Loading file…");
-      const meta = await getMeta(id);
-      const raw = await downloadTextFile(id);
+      const meta = await getMeta(id, true); // user action
+      const raw = await downloadTextFile(id, true); // user action
       const parsed = parseFileText(raw);
       writeMetaToUI(parsed.meta);
       editor.value = parsed.content;
@@ -2674,12 +2730,23 @@
     try {
       isSaving = true; setSaveDot("saving"); if (!opts.silent) setStatus("Saving…");
       const combined = buildFileText(readMetaFromUI(), getFullContent());
-      const res = await updateTextFile(currentFileId, combined);
+      // Determine if this is a user action (manual save) or auto-save
+      const isUserAction = opts.isUserAction !== undefined ? opts.isUserAction : false;
+      const res = await updateTextFile(currentFileId, combined, isUserAction);
       lastRemoteModified = Date.parse(res.modifiedTime || Date.now());
       dirty = false; isSaving = false; setSaveDot("saved"); if (!opts.silent) setStatus("Saved.");
       syncNote.textContent = `Auto-saved at ${new Date().toLocaleTimeString()}`;
       setTimeout(() => { if (!dirty) setSaveDot("idle"); }, 1200);
-    } catch (e) { console.error(e); isSaving = false; setSaveDot("idle"); setStatus("Save failed. Will retry on next edit."); }
+    } catch (e) { 
+      console.error(e); 
+      isSaving = false; 
+      setSaveDot("idle"); 
+      setStatus("Save failed. Will retry on next edit."); 
+      // Stop polling if authentication failed during auto-save
+      if (e.message.includes("Session expired")) {
+        stopPolling();
+      }
+    }
   }
 
   function startPolling(){ stopPolling(); pollTimer = setInterval(checkRemoteChanges, POLL_INTERVAL); }
@@ -2691,10 +2758,10 @@
     if (isSaving) return;
     if (dirty && now - lastInputTs < IDLE_GRACE) return;
     try {
-      const meta = await getMeta(currentFileId);
+      const meta = await getMeta(currentFileId, false); // background operation
       const remoteTs = Date.parse(meta.modifiedTime || 0);
       if (remoteTs > lastRemoteModified && !dirty) {
-        const raw = await downloadTextFile(currentFileId);
+        const raw = await downloadTextFile(currentFileId, false); // background operation
         const parsed = parseFileText(raw);
         writeMetaToUI(parsed.meta);
         editor.value = parsed.content;
@@ -2704,13 +2771,19 @@
         setStatus("Pulled latest changes from Drive.");
         updatePreview();
       }
-    } catch (e) { console.warn("Polling error", e); }
+    } catch (e) { 
+      console.warn("Polling error", e); 
+      // Stop polling if authentication failed
+      if (e.message.includes("Session expired")) {
+        stopPolling();
+      }
+    }
   }
 
   async function refreshList() {
     try { 
       setStatus("Listing files…"); 
-      const files = await listGhostwriterFiles(); 
+      const files = await listGhostwriterFiles(true); // user action
       listBody.innerHTML = files.map(f => { 
         const when = new Date(f.modifiedTime).toLocaleString(); 
         const openHere = `<button data-open="${f.id}">Open here</button>`; 
@@ -2734,12 +2807,12 @@
   async function promptRenameFile(fileId) {
     try {
       // Get current file info
-      const fileInfo = await getMeta(fileId);
+      const fileInfo = await getMeta(fileId, true); // user action
       const newName = prompt('Enter new filename:', fileInfo.name);
       
       if (newName && newName.trim() && newName !== fileInfo.name) {
         setStatus("Renaming file…");
-        await renameFile(fileId, newName.trim());
+        await renameFile(fileId, newName.trim(), true); // user action
         
         // Update the current file name if this is the active file
         if (currentFileId === fileId) {
