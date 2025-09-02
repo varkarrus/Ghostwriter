@@ -28,8 +28,7 @@
 
     /* App shell: header • main • footer */
     .app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
-    header, footer { background: var(--muted); border-bottom: 1px solid var(--line); }
-    footer { border-top: 1px solid var(--line); border-bottom: none; font-size: 12px; color: var(--sub); padding: 10px 14px; display:flex; gap:10px; align-items:center; }
+    header, #app-footer { background: var(--muted); border-bottom: 1px solid var(--line); }
 
     /* Toolbar */
     .toolbar { padding: 10px 14px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -256,10 +255,12 @@
       }
     }
 
-    /* Fixed Generate Button */
+    /* ========================= */
+    /* Generate Button - New Positioning */
+    /* ========================= */
     #fixed-generate-btn {
       position: fixed;
-      bottom: 20px;
+      bottom: 80px; /* Always positioned above footer */
       right: 20px;
       padding: 12px 24px;
       background: #4a90e2;
@@ -274,29 +275,54 @@
       z-index: 100;
       display: none;
     }
+    
     #fixed-generate-btn:hover:not(:disabled) {
       background: #357abd;
       transform: translateY(-1px);
       box-shadow: 0 6px 16px rgba(74, 144, 226, 0.4);
     }
+    
     #fixed-generate-btn:disabled {
       background: #ccc;
       cursor: not-allowed;
       transform: none;
       box-shadow: 0 2px 6px rgba(0,0,0,0.1);
     }
+    
     #fixed-generate-btn.generating {
       background: #f0c14b;
       color: #333;
     }
+    
     #fixed-generate-btn.visible {
       display: block;
+    }
+
+    /* Adjust generate button position based on footer content */
+    @media (max-width: 768px) {
+      #fixed-generate-btn {
+        left: 20px;
+        right: auto;
+        bottom: 80px; /* Base position above footer */
+      }
+      
+      /* When pagination is active, move button higher */
+      body[data-pagination-active="true"] #fixed-generate-btn {
+        bottom: 140px; /* Position above footer with pagination */
+      }
+    }
+
+    @media (min-width: 769px) {
+      /* When pagination is active on desktop, adjust slightly */
+      body[data-pagination-active="true"] #fixed-generate-btn {
+        bottom: 120px;
+      }
     }
 
     /* Cancel button */
     #cancel-generate-btn {
       position: fixed;
-      bottom: 20px;
+      bottom: 80px; /* Positioned above footer, next to generate button */
       right: 180px;
       padding: 8px 16px;
       background: #dc3545;
@@ -311,12 +337,32 @@
       z-index: 100;
       display: none;
     }
+    
     #cancel-generate-btn:hover {
       background: #c82333;
       transform: translateY(-1px);
     }
+    
     #cancel-generate-btn.visible {
       display: block;
+    }
+
+    @media (max-width: 768px) {
+      #cancel-generate-btn {
+        left: 180px;
+        right: auto;
+        bottom: 80px;
+      }
+      
+      body[data-pagination-active="true"] #cancel-generate-btn {
+        bottom: 140px;
+      }
+    }
+
+    @media (min-width: 769px) {
+      body[data-pagination-active="true"] #cancel-generate-btn {
+        bottom: 120px;
+      }
     }
 
     /* ========================= */
@@ -619,22 +665,43 @@
     }
 
     /* ========================= */
-    /* Pagination Controls */
+    /* New Footer Design */
     /* ========================= */
-    #pagination-controls {
+    #app-footer {
       background: var(--muted);
       border-top: 1px solid var(--line);
-      padding: 12px 16px;
-      font-size: 13px;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      position: relative;
+      z-index: 10;
     }
-    
+
+    #footer-console {
+      padding: 10px 14px;
+      font-size: 12px;
+      color: var(--sub);
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+    }
+
+    #footer-pagination {
+      padding: 12px 16px;
+      background: var(--muted);
+      border-top: 1px solid var(--line);
+    }
+
+    /* Pagination Controls */
     .pagination-nav {
       display: flex;
       justify-content: space-between;
       align-items: center;
       margin-bottom: 8px;
     }
-    
+
     .pagination-nav button {
       padding: 6px 12px;
       border: 1px solid var(--line);
@@ -644,27 +711,27 @@
       cursor: pointer;
       font-size: 12px;
     }
-    
+
     .pagination-nav button:disabled {
       opacity: 0.5;
       cursor: not-allowed;
     }
-    
+
     .pagination-nav button:hover:not(:disabled) {
       background: var(--line);
     }
-    
+
     #page-info {
       font-weight: 500;
       color: var(--ink);
     }
-    
+
     .pagination-progress {
       display: flex;
       align-items: center;
       gap: 12px;
     }
-    
+
     .page-progress-bar {
       flex: 1;
       height: 4px;
@@ -672,29 +739,27 @@
       border-radius: 2px;
       overflow: hidden;
     }
-    
+
     .page-progress-fill {
       height: 100%;
       background: #4a90e2;
       border-radius: 2px;
       transition: width 200ms ease;
     }
-    
+
     #page-details {
       color: var(--sub);
       font-size: 11px;
       min-width: 80px;
       text-align: right;
     }
-    
-    /* Mobile pagination adjustments */
+
+    /* Mobile footer adjustments */
     @media (max-width: 768px) {
-      #pagination-controls {
+      #footer-pagination {
         padding: 10px 12px;
-        /* Add bottom padding to prevent overlap with Generate button */
-        padding-bottom: 70px;
       }
-      
+
       .pagination-nav {
         flex-direction: row;
         justify-content: space-between;
@@ -702,14 +767,14 @@
         gap: 6px;
         margin-bottom: 8px;
       }
-      
+
       .pagination-nav button {
         flex: 0 0 auto;
         min-width: 70px;
         padding: 6px 8px;
         font-size: 12px;
       }
-      
+
       #page-info {
         flex: 1;
         text-align: center;
@@ -767,31 +832,32 @@
   <main class="main">
     <div id="editor-wrap">
       <textarea id="editor" placeholder="Write your story here…"></textarea>
-      <!-- Pagination Controls -->
-      <div id="pagination-controls" style="display: none;">
-        <div class="pagination-nav">
-          <button id="prev-page-btn" disabled>← Previous</button>
-          <span id="page-info">Page 1 of 1</span>
-          <button id="next-page-btn" disabled>Next →</button>
-        </div>
-        <div class="pagination-progress">
-          <div class="page-progress-bar">
-            <div class="page-progress-fill" style="width: 100%"></div>
-          </div>
-          <span id="page-details">0 characters</span>
-        </div>
-      </div>
     </div>
     <div id="preview" aria-live="polite"></div>
   </main>
 
-
-  <footer>
-    <span id="status">Ready.</span>
-    <span id="active-file"></span>
-    <span class="dot idle" id="save-indicator" title="Save status"></span>
-    <span class="pill" id="sync-note"></span>
-  </footer>
+  <!-- New Footer with Console and Pagination -->
+  <footer id="app-footer">
+    <div id="footer-console">
+      <span id="status">Ready.</span>
+      <span id="active-file"></span>
+      <span class="dot idle" id="save-indicator" title="Save status"></span>
+      <span class="pill" id="sync-note"></span>
+    </div>
+    
+    <!-- Pagination Controls in Footer -->
+    <div id="footer-pagination" style="display: none;">
+      <div class="pagination-nav">
+        <button id="prev-page-btn" disabled>← Previous</button>
+        <span id="page-info">Page 1 of 1</span>
+        <button id="next-page-btn" disabled>Next →</button>
+      </div>
+      <div class="pagination-progress">
+        <div class="page-progress-bar">
+          <div class="page-progress-fill" style="width: 100%"></div>
+        </div>
+        <span id="page-details">0 characters</span>
+      </div>
 </div>
 
 <!-- Side tab and drawer -->
@@ -1079,7 +1145,7 @@
   const pageSizeMobile = document.getElementById("page-size-mobile");
   const desktopPageSizeRow = document.getElementById("desktop-page-size-row");
   const mobilePageSizeRow = document.getElementById("mobile-page-size-row");
-  const paginationControls = document.getElementById("pagination-controls");
+  const paginationControls = document.getElementById("footer-pagination");
   const prevPageBtn = document.getElementById("prev-page-btn");
   const nextPageBtn = document.getElementById("next-page-btn");
   const pageInfo = document.getElementById("page-info");
@@ -1642,26 +1708,7 @@
       }
     });
     
-    // Scroll handler for Generate button positioning on mobile
-    let generateButtonScrollTimeout;
-    window.addEventListener('scroll', () => {
-      // Only apply on mobile
-      if (window.innerWidth > 480) return;
-      
-      // Throttle scroll events for performance
-      clearTimeout(generateButtonScrollTimeout);
-      generateButtonScrollTimeout = setTimeout(() => {
-        adjustGenerateButtonPosition();
-      }, 10);
-    });
-    
-    // Resize handler to reset button position when switching orientations
-    window.addEventListener('resize', () => {
-      // Small delay to allow layout to settle
-      setTimeout(() => {
-        adjustGenerateButtonPosition();
-      }, 100);
-    });
+    // Scroll and resize handlers removed - no longer needed for generate button positioning
   }
 
   // Drawer controller
@@ -2370,50 +2417,7 @@
     }
   }
 
-  function adjustGenerateButtonPosition() {
-    // Only apply on mobile
-    if (window.innerWidth > 480) {
-      fixedGenerateBtn.style.bottom = '20px';
-      return;
-    }
-    
-    // Get footer and pagination elements
-    const footer = document.querySelector('footer');
-    const paginationControls = document.getElementById('pagination-controls');
-    
-    // Find the lowest element that could be obscured
-    let lowestElement = footer;
-    if (paginationControls && paginationControls.style.display !== 'none') {
-      const paginationRect = paginationControls.getBoundingClientRect();
-      const footerRect = footer.getBoundingClientRect();
-      
-      // Use whichever element is lower on screen
-      if (paginationRect.bottom > footerRect.bottom) {
-        lowestElement = paginationControls;
-      }
-    }
-    
-    if (lowestElement) {
-      const rect = lowestElement.getBoundingClientRect();
-      const viewportHeight = window.innerHeight;
-      const buttonHeight = 60; // Approximate button height including padding
-      const buffer = 10; // Extra space between button and footer elements
-      
-      // Check if footer/pagination is visible or close to being visible
-      if (rect.top < viewportHeight) {
-        // Calculate how much the button needs to move up
-        const overlap = viewportHeight - rect.top + buffer;
-        const newBottom = Math.max(20, overlap);
-        
-        // Limit the movement to prevent the button from going too high
-        const maxBottom = Math.min(newBottom, viewportHeight * 0.3);
-        fixedGenerateBtn.style.bottom = maxBottom + 'px';
-      } else {
-        // Footer not in view, use normal position
-        fixedGenerateBtn.style.bottom = '20px';
-      }
-    }
-  }
+
 
   // =========================
   //  AI Output Cleaning Functions
@@ -2906,10 +2910,12 @@
   function updatePaginationState() {
     if (!paginationEnabled) {
       paginationControls.style.display = 'none';
+      document.body.removeAttribute('data-pagination-active');
       return;
     }
     
     paginationControls.style.display = 'block';
+    document.body.setAttribute('data-pagination-active', 'true');
     
     // Update navigation buttons
     prevPageBtn.disabled = currentPageIndex === 0;
