@@ -1397,6 +1397,20 @@
       }
     });
 
+    // Editor blur => allow repagination when cursor becomes inactive
+    editor.addEventListener("blur", () => {
+      if (paginationEnabled && isEditingPage) {
+        isEditingPage = false;
+        // Update current page content
+        if (pages[currentPageIndex]) {
+          pages[currentPageIndex].content = editor.value;
+          fullContent = rebuildFullContent();
+        }
+        // Trigger pagination recalculation
+        initializePagination();
+      }
+    });
+
     // Metadata edits => autosave
     aiPreInput.addEventListener("input", () => { markDirty(); });
     nextInstInput.addEventListener("input", () => { markDirty(); });
@@ -2370,6 +2384,13 @@
       
       applyChange(newValue, newCursorPos, newCursorPos);
       updatePreview();
+      
+      // Reset editing flag and trigger repagination after AI content generation
+      if (paginationEnabled) {
+        isEditingPage = false;
+        fullContent = editor.value;
+        initializePagination();
+      }
       
       // Jump to last page and scroll to bottom after successful generation
       jumpToLastPageAndScrollToBottom();
