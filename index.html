@@ -617,6 +617,99 @@
         max-width: none;
       }
     }
+
+    /* ========================= */
+    /* Pagination Controls */
+    /* ========================= */
+    #pagination-controls {
+      background: var(--muted);
+      border-top: 1px solid var(--line);
+      padding: 12px 16px;
+      font-size: 13px;
+    }
+    
+    .pagination-nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    
+    .pagination-nav button {
+      padding: 6px 12px;
+      border: 1px solid var(--line);
+      background: var(--bg);
+      color: var(--ink);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    
+    .pagination-nav button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .pagination-nav button:hover:not(:disabled) {
+      background: var(--line);
+    }
+    
+    #page-info {
+      font-weight: 500;
+      color: var(--ink);
+    }
+    
+    .pagination-progress {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    
+    .page-progress-bar {
+      flex: 1;
+      height: 4px;
+      background: var(--line);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    
+    .page-progress-fill {
+      height: 100%;
+      background: #4a90e2;
+      border-radius: 2px;
+      transition: width 200ms ease;
+    }
+    
+    #page-details {
+      color: var(--sub);
+      font-size: 11px;
+      min-width: 80px;
+      text-align: right;
+    }
+    
+    /* Mobile pagination adjustments */
+    @media (max-width: 768px) {
+      #pagination-controls {
+        padding: 10px 12px;
+      }
+      
+      .pagination-nav {
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      
+      .pagination-nav > div:first-child {
+        display: flex;
+        gap: 8px;
+        width: 100%;
+      }
+      
+      .pagination-nav button {
+        flex: 1;
+        max-width: 80px;
+      }
+    }
   </style>
 </head>
 <body data-mode="edit">
@@ -664,6 +757,20 @@
   <main class="main">
     <div id="editor-wrap">
       <textarea id="editor" placeholder="Write your story here…"></textarea>
+      <!-- Pagination Controls -->
+      <div id="pagination-controls" style="display: none;">
+        <div class="pagination-nav">
+          <button id="prev-page-btn" disabled>← Previous</button>
+          <span id="page-info">Page 1 of 1</span>
+          <button id="next-page-btn" disabled>Next →</button>
+        </div>
+        <div class="pagination-progress">
+          <div class="page-progress-bar">
+            <div class="page-progress-fill" style="width: 100%"></div>
+          </div>
+          <span id="page-details">0 characters</span>
+        </div>
+      </div>
     </div>
     <div id="preview" aria-live="polite"></div>
   </main>
@@ -806,6 +913,24 @@
         <span class="range-value">14px</span>
       </div>
 
+      <!-- Pagination Settings -->
+      <div class="row">
+        <label>
+          <input type="checkbox" id="pagination-enabled" />
+          Enable Pagination
+        </label>
+      </div>
+      <div class="row" id="desktop-page-size-row">
+        <label>Page Size - Desktop (characters)</label>
+        <input type="range" id="page-size-desktop" min="5000" max="50000" step="1000" value="20000" />
+        <span class="range-value">20000</span>
+      </div>
+      <div class="row" id="mobile-page-size-row" style="display: none;">
+        <label>Page Size - Mobile (characters)</label>
+        <input type="range" id="page-size-mobile" min="2000" max="20000" step="500" value="10000" />
+        <span class="range-value">10000</span>
+      </div>
+
     </div>
   </div>
   <div id="meta-foot">
@@ -938,6 +1063,19 @@
   const desktopFontRow  = document.getElementById("desktop-font-row");
   const mobileFontRow   = document.getElementById("mobile-font-row");
   
+  // Pagination elements
+  const paginationEnabledCheckbox = document.getElementById("pagination-enabled");
+  const pageSizeDesktop = document.getElementById("page-size-desktop");
+  const pageSizeMobile = document.getElementById("page-size-mobile");
+  const desktopPageSizeRow = document.getElementById("desktop-page-size-row");
+  const mobilePageSizeRow = document.getElementById("mobile-page-size-row");
+  const paginationControls = document.getElementById("pagination-controls");
+  const prevPageBtn = document.getElementById("prev-page-btn");
+  const nextPageBtn = document.getElementById("next-page-btn");
+  const pageInfo = document.getElementById("page-info");
+  const pageDetails = document.getElementById("page-details");
+  const pageProgressFill = document.querySelector(".page-progress-fill");
+  
 
   
   // Story Dex elements
@@ -1005,6 +1143,13 @@
   
   // Story Dex state
   let currentStoryDex = [];
+  
+  // Pagination state
+  let paginationEnabled = false;
+  let currentPageIndex = 0;
+  let pages = [];
+  let fullContent = '';
+  let isEditingPage = false; // Flag to prevent repagination while editing
   
   // Available models from OpenRouter
   let availableModels = [
@@ -1155,7 +1300,25 @@
     // Editor typing => autosave & preview
     editor.addEventListener("input", () => { 
       markDirty(); 
-      updatePreview(); 
+      updatePreview();
+      
+      // Mark that we're actively editing to prevent repagination
+      if (paginationEnabled) {
+        isEditingPage = true;
+        
+        // Update page details in real-time
+        const charCount = editor.value.length;
+        pageDetails.textContent = `${charCount.toLocaleString()} characters`;
+        
+        // Throttled full content update
+        clearTimeout(window.paginationUpdateTimer);
+        window.paginationUpdateTimer = setTimeout(() => {
+          if (pages[currentPageIndex]) {
+            pages[currentPageIndex].content = editor.value;
+            fullContent = rebuildFullContent();
+          }
+        }, 500);
+      }
     });
 
     // Metadata edits => autosave
@@ -1212,6 +1375,50 @@
     });
     fontSizeMobile.addEventListener("change", () => { 
       saveAISettings(); 
+    });
+
+    // Pagination event listeners
+    paginationEnabledCheckbox.addEventListener("change", () => {
+      togglePagination(paginationEnabledCheckbox.checked);
+      markDirty();
+      saveAISettings();
+    });
+    
+    pageSizeDesktop.addEventListener("input", () => {
+      updatePageSizeDisplay(pageSizeDesktop);
+      if (paginationEnabled) {
+        isEditingPage = false; // Allow repagination when user changes page size
+        initializePagination();
+      }
+    });
+    
+    pageSizeDesktop.addEventListener("change", () => {
+      saveAISettings();
+    });
+    
+    pageSizeMobile.addEventListener("input", () => {
+      updatePageSizeDisplay(pageSizeMobile);
+      if (paginationEnabled) {
+        isEditingPage = false; // Allow repagination when user changes page size
+        initializePagination();
+      }
+    });
+    
+    pageSizeMobile.addEventListener("change", () => {
+      saveAISettings();
+    });
+    
+    // Page navigation
+    prevPageBtn.addEventListener("click", () => {
+      if (currentPageIndex > 0) {
+        switchToPage(currentPageIndex - 1);
+      }
+    });
+    
+    nextPageBtn.addEventListener("click", () => {
+      if (currentPageIndex < pages.length - 1) {
+        switchToPage(currentPageIndex + 1);
+      }
     });
 
 
@@ -1407,10 +1614,22 @@
     updateFontSizeDisplay(fontSizeDesktop);
     updateFontSizeDisplay(fontSizeMobile);
     
-    // Media query listener for responsive font size
+    // Initialize pagination settings
+    updatePageSizeDisplay(pageSizeDesktop);
+    updatePageSizeDisplay(pageSizeMobile);
+    updatePageSizeRowVisibility();
+    
+    // Media query listener for responsive font size and pagination
     window.matchMedia('(max-width: 768px)').addEventListener('change', () => {
       updateFontSizeRowVisibility();
+      updatePageSizeRowVisibility();
       applyFontSize();
+      
+      // Re-paginate if page size changed between desktop/mobile
+      if (paginationEnabled) {
+        isEditingPage = false;
+        initializePagination();
+      }
     });
   }
 
@@ -2490,6 +2709,20 @@
         updateFontSizeDisplay(fontSizeMobile);
       }
       
+      // Load pagination settings
+      if (settings.pagination_enabled !== undefined) {
+        paginationEnabledCheckbox.checked = settings.pagination_enabled;
+        togglePagination(settings.pagination_enabled);
+      }
+      if (settings.page_size_desktop) {
+        pageSizeDesktop.value = settings.page_size_desktop;
+        updatePageSizeDisplay(pageSizeDesktop);
+      }
+      if (settings.page_size_mobile) {
+        pageSizeMobile.value = settings.page_size_mobile;
+        updatePageSizeDisplay(pageSizeMobile);
+      }
+      
       // Apply current font size based on screen size
       applyFontSize();
       
@@ -2541,8 +2774,190 @@
   //  Pagination Helpers
   // =========================
 
-
-
+  function getCurrentPageSize() {
+    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+    return parseInt(isMobile ? pageSizeMobile.value : pageSizeDesktop.value) || (isMobile ? 10000 : 20000);
+  }
+  
+  function splitContentIntoPages(content) {
+    if (!paginationEnabled || !content) {
+      return [{ content: content || '', startIndex: 0 }];
+    }
+    
+    const pageSize = getCurrentPageSize();
+    const pages = [];
+    
+    // Split by paragraphs first
+    const paragraphs = content.split(/\n\s*\n/);
+    let currentPage = '';
+    let currentPageStartIndex = 0;
+    
+    for (let i = 0; i < paragraphs.length; i++) {
+      const paragraph = paragraphs[i];
+      const potentialPage = currentPage + (currentPage ? '\n\n' : '') + paragraph;
+      
+      // If adding this paragraph would exceed page size and we have content
+      if (potentialPage.length > pageSize && currentPage) {
+        // Save current page
+        pages.push({
+          content: currentPage,
+          startIndex: currentPageStartIndex
+        });
+        
+        // Start new page
+        currentPage = paragraph;
+        currentPageStartIndex = content.indexOf(paragraph, currentPageStartIndex + currentPage.length);
+      } else {
+        currentPage = potentialPage;
+      }
+    }
+    
+    // Add the last page if there's content
+    if (currentPage) {
+      pages.push({
+        content: currentPage,
+        startIndex: currentPageStartIndex
+      });
+    }
+    
+    return pages.length > 0 ? pages : [{ content: '', startIndex: 0 }];
+  }
+  
+  function rebuildFullContent() {
+    return pages.map(page => page.content).join('\n\n');
+  }
+  
+  function updatePaginationState() {
+    if (!paginationEnabled) {
+      paginationControls.style.display = 'none';
+      return;
+    }
+    
+    paginationControls.style.display = 'block';
+    
+    // Update navigation buttons
+    prevPageBtn.disabled = currentPageIndex === 0;
+    nextPageBtn.disabled = currentPageIndex >= pages.length - 1;
+    
+    // Update page info
+    pageInfo.textContent = `Page ${currentPageIndex + 1} of ${pages.length}`;
+    
+    // Update progress bar
+    const progress = pages.length > 1 ? (currentPageIndex / (pages.length - 1)) * 100 : 100;
+    pageProgressFill.style.width = `${progress}%`;
+    
+    // Update page details
+    const currentPage = pages[currentPageIndex];
+    const charCount = currentPage ? currentPage.content.length : 0;
+    pageDetails.textContent = `${charCount.toLocaleString()} characters`;
+  }
+  
+  function switchToPage(pageIndex) {
+    if (pageIndex < 0 || pageIndex >= pages.length) return;
+    
+    // Save current page content before switching
+    if (pages[currentPageIndex]) {
+      pages[currentPageIndex].content = editor.value;
+    }
+    
+    currentPageIndex = pageIndex;
+    
+    // Load new page content
+    const currentPage = pages[currentPageIndex];
+    if (currentPage) {
+      editor.value = currentPage.content;
+    }
+    
+    updatePaginationState();
+    updatePreview();
+  }
+  
+  function initializePagination() {
+    if (!paginationEnabled) {
+      pages = [{ content: fullContent, startIndex: 0 }];
+      currentPageIndex = 0;
+      editor.value = fullContent;
+      updatePaginationState();
+      return;
+    }
+    
+    pages = splitContentIntoPages(fullContent);
+    currentPageIndex = Math.min(currentPageIndex, pages.length - 1);
+    
+    const currentPage = pages[currentPageIndex];
+    editor.value = currentPage ? currentPage.content : '';
+    
+    updatePaginationState();
+    updatePreview();
+  }
+  
+  function togglePagination(enabled) {
+    if (enabled === paginationEnabled) return;
+    
+    paginationEnabled = enabled;
+    
+    if (enabled) {
+      // Save current editor content as full content
+      fullContent = editor.value;
+      initializePagination();
+    } else {
+      // Merge all pages back into full content
+      if (pages.length > 0) {
+        // Update current page with editor content
+        if (pages[currentPageIndex]) {
+          pages[currentPageIndex].content = editor.value;
+        }
+        fullContent = rebuildFullContent();
+      } else {
+        fullContent = editor.value;
+      }
+      
+      // Show full content in editor
+      editor.value = fullContent;
+      pages = [{ content: fullContent, startIndex: 0 }];
+      currentPageIndex = 0;
+      updatePaginationState();
+      updatePreview();
+    }
+    
+    // Show/hide page size controls
+    desktopPageSizeRow.style.display = enabled && !window.matchMedia('(max-width: 768px)').matches ? 'grid' : 'none';
+    mobilePageSizeRow.style.display = enabled && window.matchMedia('(max-width: 768px)').matches ? 'grid' : 'none';
+  }
+  
+  function updatePageSizeRowVisibility() {
+    if (!paginationEnabled) {
+      desktopPageSizeRow.style.display = 'none';
+      mobilePageSizeRow.style.display = 'none';
+      return;
+    }
+    
+    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+    desktopPageSizeRow.style.display = isMobile ? 'none' : 'grid';
+    mobilePageSizeRow.style.display = isMobile ? 'grid' : 'none';
+  }
+  
+  function updatePageSizeDisplay(slider) {
+    if (slider.nextElementSibling) {
+      slider.nextElementSibling.textContent = parseInt(slider.value).toLocaleString();
+    }
+  }
+  
+  function jumpToLastPageAndScrollToBottom() {
+    if (!paginationEnabled || pages.length === 0) {
+      return;
+    }
+    
+    // Switch to last page
+    switchToPage(pages.length - 1);
+    
+    // Scroll to bottom of editor
+    setTimeout(() => {
+      editor.scrollTop = editor.scrollHeight;
+      editor.focus();
+      editor.setSelectionRange(editor.value.length, editor.value.length);
+    }, 50);
+  }
 
   async function saveAISettings(isUserAction = true) {
     if (!accessToken) return;
@@ -2564,6 +2979,10 @@
         font_family: fontFamilySelect.value || "mono",
         font_size_desktop: parseInt(fontSizeDesktop.value) || 14,
         font_size_mobile: parseInt(fontSizeMobile.value) || 14,
+        // Pagination preferences
+        pagination_enabled: !!paginationEnabledCheckbox.checked,
+        page_size_desktop: parseInt(pageSizeDesktop.value) || 20000,
+        page_size_mobile: parseInt(pageSizeMobile.value) || 10000,
         last_updated: new Date().toISOString()
       };
       
@@ -2708,6 +3127,14 @@
       writeMetaToUI(parsed.meta);
       editor.value = parsed.content;
       
+      // Initialize pagination with loaded content
+      fullContent = parsed.content;
+      if (paginationEnabled) {
+        initializePagination();
+      } else {
+        updatePaginationState(); // Ensure pagination UI is hidden
+      }
+      
       setActiveFile(id, meta.name || "(unknown)");
       lastRemoteModified = Date.parse(meta.modifiedTime || 0);
       startPolling();
@@ -2721,7 +3148,17 @@
 
   // Get the full content
   function getFullContent() {
-    return editor.value;
+    if (!paginationEnabled) {
+      return editor.value;
+    }
+    
+    // Update current page with editor content
+    if (pages[currentPageIndex]) {
+      pages[currentPageIndex].content = editor.value;
+    }
+    
+    // Return merged content from all pages
+    return rebuildFullContent();
   }
 
   async function flushSave(opts={}) {
@@ -2765,6 +3202,12 @@
         const parsed = parseFileText(raw);
         writeMetaToUI(parsed.meta);
         editor.value = parsed.content;
+        
+        // Update pagination with pulled content
+        fullContent = parsed.content;
+        if (paginationEnabled) {
+          initializePagination();
+        }
         
         lastRemoteModified = remoteTs;
         syncNote.textContent = `Updated from Drive at ${new Date().toLocaleTimeString()}`;
