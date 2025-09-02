@@ -724,6 +724,20 @@
     #page-info {
       font-weight: 500;
       color: var(--ink);
+      background: transparent;
+      border: none;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 200ms ease;
+    }
+    
+    #page-info:hover {
+      background: var(--line);
+    }
+    
+    #page-info:active {
+      background: var(--muted);
     }
 
     .pagination-progress {
@@ -783,6 +797,9 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        background: transparent;
+        border: none;
+        padding: 6px 8px;
       }
     }
   </style>
@@ -849,7 +866,7 @@
     <div id="footer-pagination" style="display: none;">
       <div class="pagination-nav">
         <button id="prev-page-btn" disabled>← Previous</button>
-        <span id="page-info">Page 1 of 1</span>
+        <button id="page-info" title="Click to jump to page">Page 1 of 1</button>
         <button id="next-page-btn" disabled>Next →</button>
       </div>
       <div class="pagination-progress">
@@ -1495,6 +1512,22 @@
       if (currentPageIndex < pages.length - 1) {
         switchToPage(currentPageIndex + 1);
       }
+    });
+    
+    // Page info click - jump to specific page
+    pageInfo.addEventListener("click", () => {
+      if (!paginationEnabled || pages.length <= 1) return;
+      
+      const targetPage = prompt(`Jump to page (1-${pages.length}):`);
+      if (targetPage === null) return; // User cancelled
+      
+      const pageNum = parseInt(targetPage, 10);
+      if (isNaN(pageNum) || pageNum < 1 || pageNum > pages.length) {
+        alert(`Please enter a valid page number between 1 and ${pages.length}.`);
+        return;
+      }
+      
+      switchToPage(pageNum - 1); // Convert to 0-based index
     });
 
 
