@@ -608,76 +608,7 @@
       overflow-y: auto;
     }
 
-    /* Pagination Controls */
-    .pagination-controls {
-      display: none;
-      padding: 10px 16px;
-      background: var(--muted);
-      border-top: 1px solid var(--line);
-      justify-content: space-between;
-      align-items: center;
-      gap: 10px;
-      font-size: 14px;
-    }
-    .pagination-controls.active {
-      display: flex;
-    }
-    .pagination-nav {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-    .pagination-nav button {
-      padding: 6px 12px;
-      border: 1px solid var(--line);
-      background: var(--bg);
-      color: var(--ink);
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 13px;
-    }
-    .pagination-nav button:hover:not(:disabled) {
-      background: var(--muted);
-    }
-    .pagination-nav button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .pagination-info {
-      color: var(--sub);
-      font-size: 13px;
-    }
-    .page-progress {
-      flex: 1;
-      max-width: 200px;
-      margin: 0 10px;
-    }
-    .page-progress-bar {
-      width: 100%;
-      height: 4px;
-      background: var(--line);
-      border-radius: 2px;
-      overflow: hidden;
-    }
-    .page-progress-fill {
-      height: 100%;
-      background: #007bff;
-      transition: width 0.2s ease;
-    }
 
-    /* Mobile pagination adjustments */
-    @media (max-width: 768px) {
-      .pagination-controls {
-        padding: 8px 12px;
-        font-size: 13px;
-        flex-wrap: wrap;
-      }
-      .pagination-nav {
-        gap: 6px;
-      }
-      .pagination-nav button {
-        padding: 5px 10px;
-        font-size: 12px;
       }
       .page-progress {
         order: 3;
@@ -737,20 +668,6 @@
     <div id="preview" aria-live="polite"></div>
   </main>
 
-  <div id="pagination-controls" class="pagination-controls">
-    <div class="pagination-nav">
-      <button id="prev-page-btn" disabled>← Previous</button>
-      <button id="next-page-btn" disabled>Next →</button>
-    </div>
-    <div class="pagination-info">
-      <span id="page-info">Page 1 of 1</span>
-    </div>
-    <div class="page-progress">
-      <div class="page-progress-bar">
-        <div id="page-progress-fill" class="page-progress-fill" style="width: 100%"></div>
-      </div>
-    </div>
-  </div>
 
   <footer>
     <span id="status">Ready.</span>
@@ -888,22 +805,7 @@
         <input type="range" id="font-size-mobile" min="12" max="20" step="1" value="14" />
         <span class="range-value">14px</span>
       </div>
-      <div class="row">
-        <label>
-          <input type="checkbox" id="pagination-enabled" />
-          Enable Pagination
-        </label>
-      </div>
-      <div class="row" id="desktop-page-length-row">
-        <label>Page Length (Desktop)</label>
-        <input type="range" id="page-length-desktop" min="500" max="5000" step="100" value="2000" />
-        <span class="range-value">2000 words</span>
-      </div>
-      <div class="row" id="mobile-page-length-row" style="display: none;">
-        <label>Page Length (Mobile)</label>
-        <input type="range" id="page-length-mobile" min="300" max="2000" step="50" value="1000" />
-        <span class="range-value">1000 words</span>
-      </div>
+
     </div>
   </div>
   <div id="meta-foot">
@@ -1036,19 +938,7 @@
   const desktopFontRow  = document.getElementById("desktop-font-row");
   const mobileFontRow   = document.getElementById("mobile-font-row");
   
-  // Pagination settings elements
-  const paginationEnabled = document.getElementById("pagination-enabled");
-  const pageLengthDesktop = document.getElementById("page-length-desktop");
-  const pageLengthMobile  = document.getElementById("page-length-mobile");
-  const desktopPageLengthRow = document.getElementById("desktop-page-length-row");
-  const mobilePageLengthRow  = document.getElementById("mobile-page-length-row");
-  
-  // Pagination controls elements
-  const paginationControls = document.getElementById("pagination-controls");
-  const prevPageBtn = document.getElementById("prev-page-btn");
-  const nextPageBtn = document.getElementById("next-page-btn");
-  const pageInfo = document.getElementById("page-info");
-  const pageProgressFill = document.getElementById("page-progress-fill");
+
   
   // Story Dex elements
   const storyDexBtn = document.getElementById("story-dex-btn");
@@ -1104,11 +994,7 @@
   let generationController = null; // AbortController for canceling requests
   let isCtrlHeld = false; // Track if CTRL key is being held
   
-  // Pagination state
-  let currentPage = 1;
-  let totalPages = 1;
-  let pageContent = []; // Array to store content for each page
-  let isPaginationActive = false;
+
   
   // Current active tab
   let activeTab = 'story';
@@ -1251,13 +1137,6 @@
     editor.addEventListener("input", () => { 
       markDirty(); 
       updatePreview(); 
-      if (isPaginationActive) {
-        // Debounce pagination updates to avoid excessive recalculation
-        clearTimeout(window.paginationUpdateTimer);
-        window.paginationUpdateTimer = setTimeout(() => {
-          updatePagination();
-        }, 500);
-      }
     });
 
     // Metadata edits => autosave
@@ -1316,33 +1195,7 @@
       saveAISettings(); 
     });
 
-    // Pagination settings event listeners
-    paginationEnabled.addEventListener("change", () => {
-      togglePagination(paginationEnabled.checked);
-      saveAISettings();
-    });
-    pageLengthDesktop.addEventListener("input", () => {
-      updatePageLengthDisplay(pageLengthDesktop);
-      if (isPaginationActive) updatePagination();
-    });
-    pageLengthDesktop.addEventListener("change", () => {
-      saveAISettings();
-    });
-    pageLengthMobile.addEventListener("input", () => {
-      updatePageLengthDisplay(pageLengthMobile);
-      if (isPaginationActive) updatePagination();
-    });
-    pageLengthMobile.addEventListener("change", () => {
-      saveAISettings();
-    });
 
-    // Pagination navigation event listeners
-    prevPageBtn.addEventListener("click", () => {
-      navigateToPage(currentPage - 1);
-    });
-    nextPageBtn.addEventListener("click", () => {
-      navigateToPage(currentPage + 1);
-    });
 
     // Drawer open/close
     const toggle = () => openMeta(metaPanel.getAttribute('data-open') !== '1');
@@ -1379,19 +1232,7 @@
         }
         return; 
       }
-      // Page navigation shortcuts (Ctrl/Cmd + Left/Right arrows)
-      if (isPaginationActive && primary) {
-        if (e.key === 'ArrowLeft') {
-          e.preventDefault();
-          navigateToPage(currentPage - 1);
-          return;
-        }
-        if (e.key === 'ArrowRight') {
-          e.preventDefault();
-          navigateToPage(currentPage + 1);
-          return;
-        }
-      }
+
       if (e.key === 'Escape') { if (metaPanel.getAttribute('data-open') === '1') { e.preventDefault(); openMeta(false); } }
       if (e.key === "Tab") {
         const { start, end } = getSelection(editor);
@@ -1544,18 +1385,13 @@
     
     // Initialize display settings
     updateFontSizeRowVisibility();
-    updatePageLengthRowVisibility();
     updateFontSizeDisplay(fontSizeDesktop);
     updateFontSizeDisplay(fontSizeMobile);
-    updatePageLengthDisplay(pageLengthDesktop);
-    updatePageLengthDisplay(pageLengthMobile);
     
-    // Media query listener for responsive font size and pagination controls
+    // Media query listener for responsive font size
     window.matchMedia('(max-width: 768px)').addEventListener('change', () => {
       updateFontSizeRowVisibility();
-      updatePageLengthRowVisibility();
       applyFontSize();
-      if (isPaginationActive) updatePagination();
     });
   }
 
@@ -1977,7 +1813,7 @@
   }
 
   function buildAIPrompt() {
-    // Get the full content (combines all pages when pagination is active)
+    // Get the full content
       const currentContent = getFullContent() || "";
       
       // Apply max input length limit - keep only recent paragraphs if content is too long
@@ -2635,20 +2471,6 @@
         updateFontSizeDisplay(fontSizeMobile);
       }
       
-      // Apply pagination preferences
-      if (settings.pagination_enabled !== undefined) {
-        paginationEnabled.checked = settings.pagination_enabled;
-        togglePagination(settings.pagination_enabled);
-      }
-      if (settings.page_length_desktop) {
-        pageLengthDesktop.value = settings.page_length_desktop;
-        updatePageLengthDisplay(pageLengthDesktop);
-      }
-      if (settings.page_length_mobile) {
-        pageLengthMobile.value = settings.page_length_mobile;
-        updatePageLengthDisplay(pageLengthMobile);
-      }
-      
       // Apply current font size based on screen size
       applyFontSize();
       
@@ -2699,229 +2521,9 @@
   // =========================
   //  Pagination Helpers
   // =========================
-  function updatePageLengthRowVisibility() {
-    const isMobile = window.matchMedia('(max-width: 768px)').matches;
-    if (isMobile) {
-      desktopPageLengthRow.style.display = 'none';
-      mobilePageLengthRow.style.display = 'grid';
-    } else {
-      desktopPageLengthRow.style.display = 'grid';
-      mobilePageLengthRow.style.display = 'none';
-    }
-  }
 
-  function updatePageLengthDisplay(slider) {
-    const rangeValue = slider.parentNode.querySelector('.range-value');
-    if (rangeValue) {
-      rangeValue.textContent = slider.value + ' words';
-    }
-  }
 
-  function getWordCount(text) {
-    if (!text || !text.trim()) return 0;
-    return text.trim().split(/\s+/).length;
-  }
 
-  function getCurrentPageLength() {
-    const isMobile = window.matchMedia('(max-width: 768px)').matches;
-    return parseInt(isMobile ? pageLengthMobile.value : pageLengthDesktop.value) || (isMobile ? 1000 : 2000);
-  }
-
-  function splitContentIntoPages(content) {
-    if (!isPaginationActive || !content.trim()) {
-      return [content];
-    }
-
-    const maxWordsPerPage = getCurrentPageLength();
-    const paragraphs = content.split(/\n\s*\n/).filter(p => p.trim());
-    const pages = [];
-    let currentPage = '';
-    let currentWordCount = 0;
-
-    for (const paragraph of paragraphs) {
-      const paragraphWordCount = getWordCount(paragraph);
-      
-      if (currentWordCount + paragraphWordCount > maxWordsPerPage && currentPage.trim()) {
-        // Start new page - trim completed pages
-        pages.push(currentPage.trim());
-        currentPage = paragraph;
-        currentWordCount = paragraphWordCount;
-      } else {
-        // Add to current page
-        if (currentPage) currentPage += '\n\n';
-        currentPage += paragraph;
-        currentWordCount += paragraphWordCount;
-      }
-    }
-
-    if (currentPage.trim()) {
-      // For the last page, preserve trailing whitespace by checking original content
-      if (pages.length === 0) {
-        // Single page - preserve original trailing whitespace
-        pages.push(content);
-      } else {
-        // Multiple pages - preserve trailing whitespace on last page
-        const originalTrailingWhitespace = content.match(/\s*$/)?.[0] || '';
-        pages.push(currentPage + originalTrailingWhitespace);
-      }
-    }
-
-    return pages.length > 0 ? pages : [''];
-  }
-
-  function updatePaginationDisplay() {
-    if (!isPaginationActive) {
-      paginationControls.classList.remove('active');
-      return;
-    }
-
-    paginationControls.classList.add('active');
-    
-    // Update page info
-    pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
-    
-    // Update buttons
-    prevPageBtn.disabled = currentPage <= 1;
-    nextPageBtn.disabled = currentPage >= totalPages;
-    
-    // Update progress bar
-    const progress = totalPages > 1 ? ((currentPage - 1) / (totalPages - 1)) * 100 : 100;
-    pageProgressFill.style.width = progress + '%';
-  }
-
-  function showCurrentPage() {
-    if (!isPaginationActive || !pageContent || pageContent.length === 0) {
-      return;
-    }
-
-    // Initialize pagination variables if they're corrupted/undefined
-    if (typeof currentPage !== 'number' || currentPage < 1) {
-      currentPage = 1;
-    }
-
-    // Ensure currentPage is within valid bounds
-    if (currentPage > pageContent.length) {
-      currentPage = pageContent.length;
-    }
-
-    const content = pageContent[currentPage - 1] || '';
-    editor.value = content;
-    updatePreview();
-    updatePaginationDisplay();
-  }
-
-  function updatePagination() {
-    if (!isPaginationActive) {
-      // Show full content
-      currentPage = 1;
-      totalPages = 1;
-      pageContent = [editor.value];
-      updatePaginationDisplay();
-      return;
-    }
-
-    // Initialize pagination variables if they're corrupted/undefined
-    if (!pageContent || !Array.isArray(pageContent)) {
-      pageContent = [];
-    }
-    if (typeof currentPage !== 'number' || currentPage < 1) {
-      currentPage = 1;
-    }
-    if (typeof totalPages !== 'number' || totalPages < 1) {
-      totalPages = 1;
-    }
-
-    // Get all content by combining pages or current editor content
-    let fullContent;
-    if (pageContent.length > 1 && currentPage > 0 && currentPage <= pageContent.length) {
-      // Update current page content
-      pageContent[currentPage - 1] = editor.value;
-      fullContent = pageContent.join('\n\n');
-    } else {
-      fullContent = editor.value;
-    }
-
-    // Split into pages
-    pageContent = splitContentIntoPages(fullContent);
-    totalPages = pageContent.length;
-    
-    // Ensure current page is valid
-    if (currentPage > totalPages) {
-      currentPage = totalPages;
-    }
-    if (currentPage < 1) {
-      currentPage = 1;
-    }
-
-    // Only update the display if the editor doesn't have focus to prevent cursor jumping
-    if (document.activeElement !== editor) {
-      showCurrentPage();
-    } else {
-      // Just update the pagination display without changing editor content
-      updatePaginationDisplay();
-    }
-  }
-
-  function navigateToPage(pageNumber) {
-    if (pageNumber < 1 || pageNumber > totalPages) return;
-    
-    // Initialize pagination variables if they're corrupted/undefined
-    if (!pageContent || !Array.isArray(pageContent)) {
-      pageContent = [editor.value];
-    }
-    if (typeof currentPage !== 'number' || currentPage < 1) {
-      currentPage = 1;
-    }
-    
-    // Save current page content
-    if (currentPage > 0 && currentPage <= pageContent.length) {
-      pageContent[currentPage - 1] = editor.value;
-    }
-    
-    currentPage = pageNumber;
-    showCurrentPage();
-  }
-
-  function jumpToLastPageAndScrollToBottom() {
-    if (isPaginationActive && totalPages > 1) {
-      // Navigate to the last page
-      navigateToPage(totalPages);
-    }
-    
-    // Set cursor to the end of the content and scroll to bottom
-    const textLength = editor.value.length;
-    setSelection(editor, textLength, textLength);
-    
-    // Scroll editor to bottom
-    editor.scrollTop = editor.scrollHeight;
-    
-    // Focus the editor
-    editor.focus();
-  }
-
-  function togglePagination(enabled) {
-    isPaginationActive = enabled;
-    
-    if (enabled) {
-      // Initialize pagination
-      updatePagination();
-      // Jump to last page and scroll to bottom when enabling pagination
-      jumpToLastPageAndScrollToBottom();
-    } else {
-      // Show full content
-      if (pageContent.length > 1) {
-        // Combine all pages
-        pageContent[currentPage - 1] = editor.value; // Save current changes
-        const fullContent = pageContent.join('\n\n');
-        editor.value = fullContent;
-        updatePreview();
-      }
-      currentPage = 1;
-      totalPages = 1;
-      pageContent = [editor.value];
-      updatePaginationDisplay();
-    }
-  }
 
   async function saveAISettings() {
     if (!accessToken) return;
@@ -2943,10 +2545,6 @@
         font_family: fontFamilySelect.value || "mono",
         font_size_desktop: parseInt(fontSizeDesktop.value) || 14,
         font_size_mobile: parseInt(fontSizeMobile.value) || 14,
-        // Pagination preferences
-        pagination_enabled: !!paginationEnabled.checked,
-        page_length_desktop: parseInt(pageLengthDesktop.value) || 2000,
-        page_length_mobile: parseInt(pageLengthMobile.value) || 1000,
         last_updated: new Date().toISOString()
       };
       
@@ -3054,11 +2652,6 @@
       writeMetaToUI(parsed.meta);
       editor.value = parsed.content;
       
-      // Update pagination state when loading file
-      if (isPaginationActive) {
-        updatePagination();
-      }
-      
       setActiveFile(id, meta.name || "(unknown)");
       lastRemoteModified = Date.parse(meta.modifiedTime || 0);
       startPolling();
@@ -3070,18 +2663,9 @@
 
   function scheduleAutosave(){ clearTimeout(autosaveTimer); autosaveTimer = setTimeout(() => flushSave(), AUTOSAVE_DELAY); }
 
-  // Get the full content, combining all pages when pagination is active
+  // Get the full content
   function getFullContent() {
-    if (!isPaginationActive || pageContent.length <= 1) {
-      return editor.value;
-    }
-    
-    // Save current page content before combining
-    if (currentPage > 0 && currentPage <= pageContent.length) {
-      pageContent[currentPage - 1] = editor.value;
-    }
-    
-    return pageContent.join('\n\n');
+    return editor.value;
   }
 
   async function flushSave(opts={}) {
@@ -3114,11 +2698,6 @@
         const parsed = parseFileText(raw);
         writeMetaToUI(parsed.meta);
         editor.value = parsed.content;
-        
-        // Update pagination state when loading remote content
-        if (isPaginationActive) {
-          updatePagination();
-        }
         
         lastRemoteModified = remoteTs;
         syncNote.textContent = `Updated from Drive at ${new Date().toLocaleTimeString()}`;
