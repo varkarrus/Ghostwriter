@@ -2421,7 +2421,12 @@
       // Reset editing flag and trigger repagination after AI content generation
       if (paginationEnabled) {
         isEditingPage = false;
-        fullContent = editor.value;
+        // Update current page with the new content (including AI generation)
+        if (pages[currentPageIndex]) {
+          pages[currentPageIndex].content = editor.value;
+        }
+        // Rebuild full content from all pages to preserve other pages
+        fullContent = rebuildFullContent();
         initializePagination();
       }
       
