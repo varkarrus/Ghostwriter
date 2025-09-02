@@ -1633,6 +1633,27 @@
         initializePagination();
       }
     });
+    
+    // Scroll handler for Generate button positioning on mobile
+    let generateButtonScrollTimeout;
+    window.addEventListener('scroll', () => {
+      // Only apply on mobile
+      if (window.innerWidth > 480) return;
+      
+      // Throttle scroll events for performance
+      clearTimeout(generateButtonScrollTimeout);
+      generateButtonScrollTimeout = setTimeout(() => {
+        adjustGenerateButtonPosition();
+      }, 10);
+    });
+    
+    // Resize handler to reset button position when switching orientations
+    window.addEventListener('resize', () => {
+      // Small delay to allow layout to settle
+      setTimeout(() => {
+        adjustGenerateButtonPosition();
+      }, 100);
+    });
   }
 
   // Drawer controller
@@ -2338,6 +2359,51 @@
     } else {
       fixedGenerateBtn.textContent = isGenerating ? 'Generating...' : 'Generate with AI';
       fixedGenerateBtn.title = 'Generate AI content (Ctrl/⌘+G)';
+    }
+  }
+
+  function adjustGenerateButtonPosition() {
+    // Only apply on mobile
+    if (window.innerWidth > 480) {
+      fixedGenerateBtn.style.bottom = '20px';
+      return;
+    }
+    
+    // Get footer and pagination elements
+    const footer = document.querySelector('footer');
+    const paginationControls = document.getElementById('pagination-controls');
+    
+    // Find the lowest element that could be obscured
+    let lowestElement = footer;
+    if (paginationControls && paginationControls.style.display !== 'none') {
+      const paginationRect = paginationControls.getBoundingClientRect();
+      const footerRect = footer.getBoundingClientRect();
+      
+      // Use whichever element is lower on screen
+      if (paginationRect.bottom > footerRect.bottom) {
+        lowestElement = paginationControls;
+      }
+    }
+    
+    if (lowestElement) {
+      const rect = lowestElement.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
+      const buttonHeight = 60; // Approximate button height including padding
+      const buffer = 10; // Extra space between button and footer elements
+      
+      // Check if footer/pagination is visible or close to being visible
+      if (rect.top < viewportHeight) {
+        // Calculate how much the button needs to move up
+        const overlap = viewportHeight - rect.top + buffer;
+        const newBottom = Math.max(20, overlap);
+        
+        // Limit the movement to prevent the button from going too high
+        const maxBottom = Math.min(newBottom, viewportHeight * 0.3);
+        fixedGenerateBtn.style.bottom = maxBottom + 'px';
+      } else {
+        // Footer not in view, use normal position
+        fixedGenerateBtn.style.bottom = '20px';
+      }
     }
   }
 
