@@ -696,20 +696,28 @@
       }
       
       .pagination-nav {
-        flex-direction: column;
-        gap: 8px;
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+        gap: 6px;
         margin-bottom: 8px;
       }
       
-      .pagination-nav > div:first-child {
-        display: flex;
-        gap: 8px;
-        width: 100%;
+      .pagination-nav button {
+        flex: 0 0 auto;
+        min-width: 70px;
+        padding: 6px 8px;
+        font-size: 12px;
       }
       
-      .pagination-nav button {
+      #page-info {
         flex: 1;
-        max-width: 80px;
+        text-align: center;
+        font-size: 12px;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
     }
   </style>
