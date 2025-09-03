@@ -1528,11 +1528,9 @@
   async function refreshModalFileList() {
     if (!accessToken) return;
     try {
-      const files = await fetch(DRIVE_FILES_URL + "?q=name contains '.md'&orderBy=modifiedTime desc&pageSize=20", {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      }).then(r => r.json());
+      const files = await listGhostwriterFiles(true);
       
-      modalListBody.innerHTML = files.items?.map(f => {
+      modalListBody.innerHTML = files?.map(f => {
         const when = new Date(f.modifiedTime).toLocaleDateString();
         const openHere = `<button data-open="${f.id}" style="padding:2px 6px;font-size:11px;">Open</button>`;
         const rename = `<button data-rename="${f.id}" style="padding:2px 6px;font-size:11px;">Rename</button>`;
