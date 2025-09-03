@@ -815,7 +815,8 @@
         <span class="pill" id="auth-state">Signed out</span>
       </div>
       <div class="row">
-        <button id="create-file-btn" disabled>Create new file</button>
+        <button id="save-as-btn" disabled>Save As</button>
+        <button id="new-btn" disabled>New</button>
         <input id="file-id-input" type="text" placeholder="Paste File ID and press Enter (or use ?file=...)" />
         <button id="list-btn" disabled>My files</button>
       </div>
@@ -1116,7 +1117,8 @@
   // =========================
   const authBtn      = document.getElementById("auth-btn");
   const signoutBtn   = document.getElementById("signout-btn");
-  const createBtn    = document.getElementById("create-file-btn");
+  const saveAsBtn    = document.getElementById("save-as-btn");
+  const newBtn       = document.getElementById("new-btn");
   const listBtn      = document.getElementById("list-btn");
   const fileIdInput  = document.getElementById("file-id-input");
   const editor = document.getElementById("editor");
@@ -1274,10 +1276,12 @@
   }
   function setSignedInUI(signedIn) {
     authStateEl.textContent = signedIn ? "Signed in" : "Signed out";
-    createBtn.disabled = !signedIn;
+    saveAsBtn.disabled = !signedIn;
+    newBtn.disabled = !signedIn;
     signoutBtn.disabled = !signedIn;
     listBtn.disabled = !signedIn;
     fileIdInput.disabled = !signedIn;
+    editor.disabled = !signedIn; // Block typing while logged out
     [boldBtn, italicBtn, underlineBtn, hiddenBtn, bulletBtn, headerBtn, headingSel, togglePreviewBtn, toggleSplitBtn, aiPreInput, nextInstInput, nextEnabled, metaClose, metaSaveNow, fixedGenerateBtn].forEach(el => el.disabled = !signedIn);
     metaTab.setAttribute('aria-disabled', String(!signedIn));
     if (!signedIn) openMeta(false);
@@ -1285,6 +1289,9 @@
   function getQueryFileId() { const p = new URLSearchParams(location.search); return p.get("file"); }
 
   window.addEventListener("load", () => {
+    // Initialize UI as disabled first
+    setSignedInUI(false);
+    
     const waitFor = (cond) => new Promise(res => { const t = () => cond() ? res() : setTimeout(t, 50); t(); });
     waitFor(() => window.google && google.accounts && google.accounts.oauth2).then(() => {
       tokenClient = google.accounts.oauth2.initTokenClient({
@@ -1314,10 +1321,16 @@
         if (preset) { fileIdInput.value = preset; loadFile(preset); }
       } else {
         setStatus("Ready. Sign in to begin.");
+        setSignedInUI(false); // Ensure UI is properly disabled when not signed in
       }
       
       updateGenerateButton(); // Initialize AI button state
-    }).catch(err => { console.error(err); setStatus("Failed to initialize Google Identity Services."); });
+    }).catch(err => { 
+      console.error(err); 
+      setStatus("Failed to initialize Google Identity Services."); 
+      // Ensure UI is properly disabled even if Google services fail to load
+      setSignedInUI(false);
+    });
   });
 
   function ensureAuth(action, fn) {
@@ -1385,7 +1398,8 @@
       }
     });
 
-    createBtn.addEventListener("click", ensureAuth("creating a file", createNewFile));
+    saveAsBtn.addEventListener("click", ensureAuth("saving file with new name", saveAsFile));
+    newBtn.addEventListener("click", ensureAuth("creating a new document", newDocument));
 
     fileIdInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { const id = fileIdInput.value.trim(); if (id) ensureAuth("opening a file", () => loadFile(id))(); } });
 
@@ -3261,6 +3275,114 @@
       const u = new URL(location.href); u.searchParams.set("file", meta.id); history.replaceState({}, "", u.toString());
       updatePreview();
     } catch (e) { console.error(e); setStatus("Failed to create file. See console."); }
+  }
+
+  async function saveAsFile() {
+    try {
+      // Prompt user for filename
+      const newFilename = prompt("Enter filename for Save As:", "");
+      if (!newFilename || !newFilename.trim()) {
+        setStatus("Save As cancelled.");
+        return;
+      }
+      
+      const trimmedFilename = newFilename.trim();
+      setStatus("Checking for existing files…");
+      
+      // Check if file with this name already exists
+      const existingFiles = await listGhostwriterFiles(true);
+      const conflictingFile = existingFiles.find(f => f.name === trimmedFilename);
+      
+      if (conflictingFile) {
+        const overwrite = confirm(`A file named "${trimmedFilename}" already exists. Do you want to overwrite it?`);
+        if (!overwrite) {
+          setStatus("Save As cancelled.");
+          return;
+        }
+      }
+      
+      setStatus("Saving file with new name…");
+      const combined = buildFileText(readMetaFromUI(), getFullContent() || "");
+      
+      let meta;
+      if (conflictingFile) {
+        // Overwrite existing file
+        meta = await updateTextFile(conflictingFile.id, combined, true);
+        meta.name = trimmedFilename; // Ensure name is correct
+      } else {
+        // Create new file
+        meta = await createTextFile(trimmedFilename, combined, true);
+      }
+      
+      setActiveFile(meta.id, meta.name);
+      lastRemoteModified = Date.parse(meta.modifiedTime || Date.now());
+      startPolling();
+      setStatus("File saved with new name and syncing.");
+      const u = new URL(location.href); u.searchParams.set("file", meta.id); history.replaceState({}, "", u.toString());
+      updatePreview();
+    } catch (e) { 
+      console.error(e); 
+      setStatus("Save As failed. See console."); 
+    }
+  }
+
+  async function newDocument() {
+    try {
+      // Save current work first if there's a file loaded and content exists
+      if (currentFileId && (getFullContent() || "").trim()) {
+        setStatus("Saving current work…");
+        await flushSave({ force: true, isUserAction: true });
+      } else if (!currentFileId && (getFullContent() || "").trim()) {
+        // If no current file but there's content, prompt to save first
+        const shouldSave = confirm("You have unsaved content. Would you like to save it before creating a new document?");
+        if (shouldSave) {
+          await saveAsFile();
+          if (!currentFileId) {
+            // If save was cancelled, don't proceed with new document
+            return;
+          }
+        }
+      }
+      
+      setStatus("Creating new document…");
+      
+      // Clear all content
+      editor.value = "";
+      
+      // Clear Story Dex
+      currentStoryDex = [];
+      renderStoryDex();
+      
+      // Clear metadata
+      aiPreInput.value = "";
+      nextInstInput.value = "";
+      nextEnabled.checked = false;
+      
+      // Clear active file
+      setActiveFile(null, null);
+      
+      // Clear URL parameter
+      const u = new URL(location.href); 
+      u.searchParams.delete("file"); 
+      history.replaceState({}, "", u.toString());
+      
+      // Stop polling since there's no active file
+      stopPolling();
+      
+      // Update preview
+      updatePreview();
+      
+      // Reset pagination if enabled
+      if (paginationEnabled) {
+        fullContent = "";
+        initializePagination();
+      }
+      
+      setStatus("New document ready.");
+    } catch (e) { 
+      console.error(e); 
+      setStatus("Failed to create new document. See console."); 
+    }
   }
 
   async function loadFile(id) {
