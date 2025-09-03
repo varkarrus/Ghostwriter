@@ -1618,7 +1618,19 @@
     // Initialize UI as disabled first
     setSignedInUI(false);
     
-    const waitFor = (cond) => new Promise(res => { const t = () => cond() ? res() : setTimeout(t, 50); t(); });
+    const waitFor = (cond, timeout = 10000) => new Promise((resolve, reject) => { 
+      const start = Date.now();
+      const t = () => {
+        if (cond()) {
+          resolve();
+        } else if (Date.now() - start > timeout) {
+          reject(new Error('Timeout waiting for condition'));
+        } else {
+          setTimeout(t, 50);
+        }
+      };
+      t();
+    });
     waitFor(() => window.google && google.accounts && google.accounts.oauth2).then(() => {
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CLIENT_ID,
@@ -1631,7 +1643,12 @@
           setSignedInUI(true);
           loadAISettings(); // Load saved AI settings after authentication
           const preset = getQueryFileId();
-          if (preset) { loadFile(preset); }
+          if (preset) { 
+            loadFile(preset); 
+          } else {
+            // No file to load, set default pre-prompt for new session
+            aiPreInput.value = getDefaultAIPrePrompt();
+          }
         }
       });
       wireEvents();
@@ -1648,10 +1665,17 @@
         setSignedInUI(true);
         loadAISettings();
         const preset = getQueryFileId();
-        if (preset) { loadFile(preset); }
+        if (preset) { 
+          loadFile(preset); 
+        } else {
+          // No file to load, set default pre-prompt for new session
+          aiPreInput.value = getDefaultAIPrePrompt();
+        }
       } else {
         setStatus("Ready. Sign in to begin.");
         setSignedInUI(false); // Ensure UI is properly disabled when not signed in
+        // Set default pre-prompt even when not signed in
+        aiPreInput.value = getDefaultAIPrePrompt();
       }
       
       updateGenerateButton(); // Initialize AI button state
@@ -1660,6 +1684,13 @@
       setStatus("Failed to initialize Google Identity Services."); 
       // Ensure UI is properly disabled even if Google services fail to load
       setSignedInUI(false);
+      // Set default pre-prompt even when Google services fail
+      aiPreInput.value = getDefaultAIPrePrompt();
+      // Still need to wire events and initialize mobile settings
+      wireEvents();
+      checkMobileSettings();
+      loadMobileSettings();
+      updateGenerateButton();
     });
   });
 
@@ -2185,6 +2216,14 @@
       story_dex: currentStoryDex
     };
   }
+  
+  function getDefaultAIPrePrompt() {
+    return `You're a story writing AI:
+
+- Write in third person, past tense.
+- Continue from where you last left the story off without repeating what has already been written. Continue writing from midway through a sentence if necessary.`;
+  }
+  
   function writeMetaToUI(meta){
     aiPreInput.value = meta.ai_pre_prompt || "";
     nextInstInput.value = meta.next_instructions || "";
@@ -3777,8 +3816,8 @@
       currentStoryDex = [];
       renderStoryDex();
       
-      // Clear metadata
-      aiPreInput.value = "";
+      // Clear metadata and set default pre-prompt for new documents
+      aiPreInput.value = getDefaultAIPrePrompt();
       nextInstInput.value = "";
       nextEnabled.checked = false;
       
