@@ -208,6 +208,107 @@
     /* Side tab button */
     #meta-tab[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
 
+    /* ========================= */
+    /* File Modal */
+    /* ========================= */
+    #file-modal {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.5);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    #file-modal[data-open="1"] { display: flex; }
+    
+    #file-modal-content {
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+      width: 90vw;
+      max-width: 500px;
+      max-height: 80vh;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+    }
+    
+    #file-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
+      background: var(--muted);
+      border-radius: 12px 12px 0 0;
+    }
+    
+    #file-modal-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    
+    #file-modal-close {
+      padding: 8px;
+      border: none;
+      background: none;
+      color: var(--sub);
+      cursor: pointer;
+      border-radius: 6px;
+      font-size: 18px;
+    }
+    
+    #file-modal-close:hover {
+      background: var(--line);
+      color: var(--ink);
+    }
+    
+    #file-modal-body {
+      padding: 20px;
+      overflow-y: auto;
+    }
+    
+    .file-action {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    
+    .file-action button {
+      flex: 1;
+      padding: 12px 16px;
+      border: 1px solid var(--line);
+      background: var(--bg);
+      color: var(--ink);
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    
+    .file-action button:hover:not(:disabled) {
+      background: var(--muted);
+    }
+    
+    .file-action button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    #file-list-section {
+      border-top: 1px solid var(--line);
+      padding-top: 16px;
+      margin-top: 16px;
+    }
+    
+    #file-list-section h3 {
+      margin: 0 0 12px 0;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+
     /* Responsive niceties */
     @media (max-width: 480px) {
       :root { --meta-w: 92vw; }
@@ -687,6 +788,45 @@
       align-items: center;
       border-bottom: 1px solid var(--line);
     }
+    
+    /* Mobile footer console improvements */
+    @media (max-width: 768px) {
+      #footer-console {
+        height: 36px; /* Fixed single line height */
+        overflow-x: auto;
+        overflow-y: hidden;
+        white-space: nowrap;
+        padding: 8px 14px;
+        scrollbar-width: thin;
+      }
+      
+      #footer-console::-webkit-scrollbar {
+        height: 4px;
+      }
+      
+      #footer-console::-webkit-scrollbar-track {
+        background: var(--muted);
+      }
+      
+      #footer-console::-webkit-scrollbar-thumb {
+        background: var(--line);
+        border-radius: 2px;
+      }
+      
+      /* Add bottom spacing to editor on mobile to prevent AI button overlap */
+      #editor {
+        padding-bottom: 60px;
+      }
+      
+      /* Hide controls when mobile settings are enabled */
+      body[data-hide-markdown-controls="true"] #formatting-row {
+        display: none;
+      }
+      
+      body[data-hide-footer-console="true"] #footer-console {
+        display: none;
+      }
+    }
 
     #footer-pagination {
       padding: 12px 16px;
@@ -811,15 +951,8 @@
     <div class="toolbar">
       <div class="row">
         <button id="auth-btn">Sign in</button>
-        <button id="signout-btn" disabled>Sign out</button>
-        <span class="pill" id="auth-state">Signed out</span>
-      </div>
-      <div class="row">
-        <button id="save-as-btn" disabled>Save As</button>
-        <button id="new-btn" disabled>New</button>
+        <button id="file-btn" disabled>File</button>
         <button id="export-story-btn" title="Export story in different formats">Export Story</button>
-        <input id="file-id-input" type="text" placeholder="Paste File ID and press Enter (or use ?file=...)" />
-        <button id="list-btn" disabled>My files</button>
       </div>
       <div class="row" id="formatting-row" title="Formatting inserts Markdown/HTML into the plaintext">
         <button id="bold-btn" aria-label="Bold (Ctrl/⌘+B)"><strong>B</strong></button>
@@ -1027,6 +1160,19 @@
         <span class="range-value">10000</span>
       </div>
 
+      <!-- Mobile-specific UI Settings -->
+      <div class="row" id="mobile-ui-settings" style="display: none;">
+        <h4 style="margin: 16px 0 8px 0; font-size: 14px; color: var(--ink);">Mobile Interface</h4>
+        <label style="display: block; margin-bottom: 8px;">
+          <input type="checkbox" id="hide-markdown-controls" />
+          Hide Markdown Controls
+        </label>
+        <label style="display: block;">
+          <input type="checkbox" id="hide-footer-console" />
+          Hide Footer Console
+        </label>
+      </div>
+
     </div>
   </div>
   <div id="meta-foot">
@@ -1102,6 +1248,39 @@
   </div>
 </div>
 
+<!-- File Modal -->
+<div id="file-modal" data-open="0">
+  <div id="file-modal-content">
+    <div id="file-modal-header">
+      <div id="file-modal-title">File Operations</div>
+      <button id="file-modal-close">&times;</button>
+    </div>
+    <div id="file-modal-body">
+      <div class="file-action">
+        <button id="modal-new-btn" disabled>New Document</button>
+        <button id="modal-save-as-btn" disabled>Save As</button>
+      </div>
+      <div id="file-list-section">
+        <h3>My Files</h3>
+        <div id="modal-file-list">
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <thead>
+              <tr style="background: var(--muted);">
+                <th style="padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left;">Name</th>
+                <th style="padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left;">Modified</th>
+                <th style="padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="modal-list-body">
+              <!-- Files will be populated here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   // =========================
   //  Configuration
@@ -1143,19 +1322,21 @@
   //  DOM
   // =========================
   const authBtn      = document.getElementById("auth-btn");
-  const signoutBtn   = document.getElementById("signout-btn");
-  const saveAsBtn    = document.getElementById("save-as-btn");
-  const newBtn       = document.getElementById("new-btn");
-  const listBtn      = document.getElementById("list-btn");
-  const fileIdInput  = document.getElementById("file-id-input");
+  const fileBtn      = document.getElementById("file-btn");
   const editor = document.getElementById("editor");
   const statusEl = document.getElementById("status");
-  const authStateEl  = document.getElementById("auth-state");
   const activeFileEl = document.getElementById("active-file");
-  const listPanel    = document.getElementById("list-panel");
-  const listBody     = document.getElementById("list-body");
   const saveDot      = document.getElementById("save-indicator");
   const syncNote     = document.getElementById("sync-note");
+  
+  // File modal elements
+  const fileModal = document.getElementById("file-modal");
+  const fileModalClose = document.getElementById("file-modal-close");
+  const modalNewBtn = document.getElementById("modal-new-btn");
+  const modalSaveAsBtn = document.getElementById("modal-save-as-btn");
+  const modalListBody = document.getElementById("modal-list-body");
+  
+  // Formatting controls
   const boldBtn      = document.getElementById("bold-btn");
   const italicBtn    = document.getElementById("italic-btn");
   const underlineBtn = document.getElementById("underline-btn");
@@ -1198,6 +1379,11 @@
   const pageInfo = document.getElementById("page-info");
   const pageDetails = document.getElementById("page-details");
   const pageProgressFill = document.querySelector(".page-progress-fill");
+  
+  // Mobile UI settings
+  const mobileUiSettings = document.getElementById("mobile-ui-settings");
+  const hideMarkdownControls = document.getElementById("hide-markdown-controls");
+  const hideFooterConsole = document.getElementById("hide-footer-console");
   
 
   
@@ -1305,21 +1491,129 @@
   function setActiveFile(id, name) {
     currentFileId = id || null;
     currentFileName = name || null;
-    fileIdInput.value = id || "";
     activeFileEl.textContent = id ? `• File: ${name || "(untitled)"} — ID: ${id}` : "";
   }
+  
+  function updateAuthButton(signedIn) {
+    if (signedIn) {
+      authBtn.textContent = "Sign out";
+      authBtn.title = "Sign out of Google Drive";
+    } else {
+      authBtn.textContent = "Sign in";
+      authBtn.title = "Sign in to Google Drive";
+    }
+  }
+  
   function setSignedInUI(signedIn) {
-    authStateEl.textContent = signedIn ? "Signed in" : "Signed out";
-    saveAsBtn.disabled = !signedIn;
-    newBtn.disabled = !signedIn;
-    signoutBtn.disabled = !signedIn;
-    listBtn.disabled = !signedIn;
-    fileIdInput.disabled = !signedIn;
+    updateAuthButton(signedIn);
+    fileBtn.disabled = !signedIn;
+    modalSaveAsBtn.disabled = !signedIn;
+    modalNewBtn.disabled = !signedIn;
     editor.disabled = !signedIn; // Block typing while logged out
     [boldBtn, italicBtn, underlineBtn, hiddenBtn, bulletBtn, headerBtn, headingSel, togglePreviewBtn, toggleSplitBtn, aiPreInput, nextInstInput, nextEnabled, metaClose, metaSaveNow, fixedGenerateBtn].forEach(el => el.disabled = !signedIn);
     metaTab.setAttribute('aria-disabled', String(!signedIn));
     if (!signedIn) openMeta(false);
   }
+  
+  // File modal functions
+  function openFileModal() {
+    fileModal.setAttribute('data-open', '1');
+    refreshModalFileList();
+  }
+  
+  function closeFileModal() {
+    fileModal.setAttribute('data-open', '0');
+  }
+  
+  async function refreshModalFileList() {
+    if (!accessToken) return;
+    try {
+      const files = await fetch(DRIVE_FILES_URL + "?q=name contains '.md'&orderBy=modifiedTime desc&pageSize=20", {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      }).then(r => r.json());
+      
+      modalListBody.innerHTML = files.items?.map(f => {
+        const when = new Date(f.modifiedTime).toLocaleDateString();
+        const openHere = `<button data-open="${f.id}" style="padding:2px 6px;font-size:11px;">Open</button>`;
+        const rename = `<button data-rename="${f.id}" style="padding:2px 6px;font-size:11px;">Rename</button>`;
+        const link = `https://drive.google.com/file/d/${f.id}`;
+        return `<tr style="border-bottom: 1px solid var(--line);"><td style="padding: 8px 12px;">${escapeHtml(f.name)}</td><td style="padding: 8px 12px;">${when}</td><td style="padding: 8px 12px;">${openHere} ${rename} <a href="${link}" target="_blank" rel="noreferrer">Drive</a></td></tr>`; 
+      }).join("") || '<tr><td colspan="3" style="padding: 20px; text-align: center; color: var(--sub);">No files found</td></tr>';
+      
+      // Wire up event handlers for the new buttons
+      modalListBody.querySelectorAll("button[data-open]").forEach(btn => { 
+        btn.addEventListener("click", () => {
+          loadFile(btn.getAttribute("data-open"));
+          closeFileModal();
+        }); 
+      }); 
+      modalListBody.querySelectorAll("button[data-rename]").forEach(btn => { 
+        btn.addEventListener("click", () => promptRenameFile(btn.getAttribute("data-rename"))); 
+      }); 
+    } catch (e) { 
+      console.error(e); 
+      setStatus("Failed to load file list. See console."); 
+    }
+  }
+  
+  // Mobile settings functions
+  function checkMobileSettings() {
+    const isMobile = window.innerWidth <= 768;
+    
+    // Show/hide mobile-specific settings
+    if (mobileUiSettings) {
+      mobileUiSettings.style.display = isMobile ? 'block' : 'none';
+    }
+    if (mobileFontRow) {
+      mobileFontRow.style.display = isMobile ? 'block' : 'none';
+    }
+    if (desktopFontRow) {
+      desktopFontRow.style.display = isMobile ? 'none' : 'block';
+    }
+    if (mobilePageSizeRow) {
+      mobilePageSizeRow.style.display = isMobile ? 'block' : 'none';
+    }
+    if (desktopPageSizeRow) {
+      desktopPageSizeRow.style.display = isMobile ? 'none' : 'block';
+    }
+  }
+  
+  function applyMobileSettings() {
+    if (hideMarkdownControls && hideMarkdownControls.checked) {
+      document.body.setAttribute('data-hide-markdown-controls', 'true');
+    } else {
+      document.body.removeAttribute('data-hide-markdown-controls');
+    }
+    
+    if (hideFooterConsole && hideFooterConsole.checked) {
+      document.body.setAttribute('data-hide-footer-console', 'true');
+    } else {
+      document.body.removeAttribute('data-hide-footer-console');
+    }
+  }
+  
+  function loadMobileSettings() {
+    if (hideMarkdownControls) {
+      const saved = localStorage.getItem('ghostwriter_hide_markdown_controls');
+      hideMarkdownControls.checked = saved === 'true';
+    }
+    if (hideFooterConsole) {
+      const saved = localStorage.getItem('ghostwriter_hide_footer_console');
+      hideFooterConsole.checked = saved === 'true';
+    }
+    applyMobileSettings();
+  }
+  
+  function saveMobileSettings() {
+    if (hideMarkdownControls) {
+      localStorage.setItem('ghostwriter_hide_markdown_controls', hideMarkdownControls.checked);
+    }
+    if (hideFooterConsole) {
+      localStorage.setItem('ghostwriter_hide_footer_console', hideFooterConsole.checked);
+    }
+    applyMobileSettings();
+  }
+  
   function getQueryFileId() { const p = new URLSearchParams(location.search); return p.get("file"); }
 
   window.addEventListener("load", () => {
@@ -1339,10 +1633,14 @@
           setSignedInUI(true);
           loadAISettings(); // Load saved AI settings after authentication
           const preset = getQueryFileId();
-          if (preset) { fileIdInput.value = preset; loadFile(preset); }
+          if (preset) { loadFile(preset); }
         }
       });
       wireEvents();
+      
+      // Initialize mobile settings
+      checkMobileSettings();
+      loadMobileSettings();
       
       // Check for saved authentication
       const savedAuth = getCookie('ghostwriter_auth');
@@ -1352,7 +1650,7 @@
         setSignedInUI(true);
         loadAISettings();
         const preset = getQueryFileId();
-        if (preset) { fileIdInput.value = preset; loadFile(preset); }
+        if (preset) { loadFile(preset); }
       } else {
         setStatus("Ready. Sign in to begin.");
         setSignedInUI(false); // Ensure UI is properly disabled when not signed in
@@ -1412,13 +1710,10 @@
   }
 
   function wireEvents() {
-    document.getElementById("auth-btn").addEventListener("click", () => { 
-      setStatus("Opening Google sign-in…"); 
-      allowBackgroundRefresh = true; // Allow refresh for manual sign-in
-      tokenClient.requestAccessToken({ prompt: "consent" }); 
-    });
-    signoutBtn.addEventListener("click", () => {
+    // Unified auth button - handles both sign in and sign out
+    authBtn.addEventListener("click", () => { 
       if (accessToken) {
+        // Sign out
         stopPolling();
         // Clear AI settings state on signout
         aiSettingsLoaded = false;
@@ -1427,17 +1722,39 @@
           openrouterKey.value = "";
         }
         updateGenerateButton();
-        deleteCookie('ghostwriter_auth'); // Clear saved auth
-        google.accounts.oauth2.revoke(accessToken, () => { accessToken = null; setSignedInUI(false); setActiveFile(null, null); setStatus("Signed out."); });
+        deleteCookie('ghostwriter_auth');
+        google.accounts.oauth2.revoke(accessToken, () => { 
+          accessToken = null; 
+          setSignedInUI(false); 
+          setActiveFile(null, null); 
+          setStatus("Signed out."); 
+        });
+      } else {
+        // Sign in
+        setStatus("Opening Google sign-in…"); 
+        allowBackgroundRefresh = true; // Allow refresh for manual sign-in
+        tokenClient.requestAccessToken({ prompt: "consent" }); 
       }
     });
 
-    saveAsBtn.addEventListener("click", ensureAuth("saving file with new name", saveAsFile));
-    newBtn.addEventListener("click", ensureAuth("creating a new document", newDocument));
-
-    fileIdInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { const id = fileIdInput.value.trim(); if (id) ensureAuth("opening a file", () => loadFile(id))(); } });
-
-    listBtn.addEventListener("click", ensureAuth("listing files", async () => { listPanel.style.display = listPanel.style.display === "none" ? "block" : "none"; if (listPanel.style.display === "block") { await refreshList(); } }));
+    // File modal
+    fileBtn.addEventListener("click", () => openFileModal());
+    fileModalClose.addEventListener("click", () => closeFileModal());
+    
+    // File modal actions
+    modalNewBtn.addEventListener("click", ensureAuth("creating a new document", () => {
+      newDocument();
+      closeFileModal();
+    }));
+    modalSaveAsBtn.addEventListener("click", ensureAuth("saving file with new name", () => {
+      saveAsFile();
+      closeFileModal();
+    }));
+    
+    // Close modal when clicking outside
+    fileModal.addEventListener("click", (e) => {
+      if (e.target === fileModal) closeFileModal();
+    });
 
     // Editor typing => autosave & preview
     editor.addEventListener("input", () => { 
@@ -1533,6 +1850,17 @@
       saveAISettings(); 
     });
 
+    // Mobile UI settings event listeners
+    if (hideMarkdownControls) {
+      hideMarkdownControls.addEventListener("change", saveMobileSettings);
+    }
+    if (hideFooterConsole) {
+      hideFooterConsole.addEventListener("change", saveMobileSettings);
+    }
+    
+    // Window resize handler for mobile settings visibility
+    window.addEventListener("resize", checkMobileSettings);
+    
     // Pagination event listeners
     paginationEnabledCheckbox.addEventListener("change", () => {
       togglePagination(paginationEnabledCheckbox.checked);
