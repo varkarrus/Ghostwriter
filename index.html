@@ -817,6 +817,7 @@
       <div class="row">
         <button id="save-as-btn" disabled>Save As</button>
         <button id="new-btn" disabled>New</button>
+        <button id="export-story-btn" title="Export story in different formats">Export Story</button>
         <input id="file-id-input" type="text" placeholder="Paste File ID and press Enter (or use ?file=...)" />
         <button id="list-btn" disabled>My files</button>
       </div>
@@ -1075,6 +1076,32 @@
   </div>
 </div>
 
+<!-- Export Story Modal -->
+<div id="export-story-modal" class="story-dex-modal" data-open="0">
+  <div class="story-dex-overlay"></div>
+  <div class="story-dex-content">
+    <div class="story-dex-header">
+      <h2>Export Story</h2>
+      <button id="export-story-close" class="story-dex-close">&times;</button>
+    </div>
+    <div class="story-dex-body">
+      <div style="padding: 20px;">
+        <p>Choose export format:</p>
+        <div style="margin: 20px 0; display: flex; flex-direction: column; gap: 12px;">
+          <button id="export-markdown-btn" style="padding: 12px; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; cursor: pointer; text-align: left;">
+            <strong>Markdown (.txt)</strong><br>
+            <span style="color: var(--sub); font-size: 13px;">Exports with all markdown formatting preserved</span>
+          </button>
+          <button id="export-richtext-btn" style="padding: 12px; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; cursor: pointer; text-align: left;">
+            <strong>Rich Text (.txt)</strong><br>
+            <span style="color: var(--sub); font-size: 13px;">Exports with hidden text (in square brackets) removed</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   // =========================
   //  Configuration
@@ -1188,6 +1215,13 @@
   const previewInputModal = document.getElementById("preview-input-modal");
   const previewInputClose = document.getElementById("preview-input-close");
   const previewInputText = document.getElementById("preview-input-text");
+  
+  // Export Story elements
+  const exportStoryBtn = document.getElementById("export-story-btn");
+  const exportStoryModal = document.getElementById("export-story-modal");
+  const exportStoryClose = document.getElementById("export-story-close");
+  const exportMarkdownBtn = document.getElementById("export-markdown-btn");
+  const exportRichTextBtn = document.getElementById("export-richtext-btn");
   
   const openrouterKey = document.getElementById("openrouter-key");
   const rememberKey  = document.getElementById("remember-key");
@@ -1741,6 +1775,13 @@
     exportDexBtn.addEventListener('click', exportStoryDex);
     importDexBtn.addEventListener('click', () => importDexFile.click());
     importDexFile.addEventListener('change', importStoryDex);
+    
+    // Export Story event handlers
+    exportStoryBtn.addEventListener('click', openExportStoryModal);
+    exportStoryClose.addEventListener('click', closeExportStoryModal);
+    exportStoryModal.querySelector('.story-dex-overlay').addEventListener('click', closeExportStoryModal);
+    exportMarkdownBtn.addEventListener('click', exportAsMarkdown);
+    exportRichTextBtn.addEventListener('click', exportAsRichText);
     
     // Preview Input event handlers
     previewInputBtn.addEventListener('click', openPreviewInput);
@@ -2766,6 +2807,63 @@
 
     // Reset file input for next import
     event.target.value = '';
+  }
+
+  // =========================
+  //  Export Story Functions
+  // =========================
+  function openExportStoryModal() {
+    if (!editor.value.trim()) {
+      setStatus("No story content to export.");
+      return;
+    }
+    exportStoryModal.setAttribute('data-open', '1');
+  }
+  
+  function closeExportStoryModal() {
+    exportStoryModal.setAttribute('data-open', '0');
+  }
+  
+  function exportAsMarkdown() {
+    const content = editor.value;
+    if (!content.trim()) {
+      setStatus("No story content to export.");
+      return;
+    }
+    
+    const filename = `story-markdown-${new Date().toISOString().slice(0, 10)}.txt`;
+    downloadStoryFile(content, filename);
+    setStatus("Story exported as Markdown.");
+    closeExportStoryModal();
+  }
+  
+  function exportAsRichText() {
+    const content = editor.value;
+    if (!content.trim()) {
+      setStatus("No story content to export.");
+      return;
+    }
+    
+    // Remove content in square brackets (hidden text)
+    const cleanedContent = content.replace(/\[.*?\]/g, '');
+    
+    const filename = `story-richtext-${new Date().toISOString().slice(0, 10)}.txt`;
+    downloadStoryFile(cleanedContent, filename);
+    setStatus("Story exported as Rich Text (hidden content removed).");
+    closeExportStoryModal();
+  }
+  
+  function downloadStoryFile(content, filename) {
+    const dataBlob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(dataBlob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   // =========================
