@@ -1115,9 +1115,14 @@
       </div>
       <div class="row">
         <label for="ai-model">AI Model</label>
-        <div style="position: relative;">
-          <input type="text" id="ai-model" placeholder="Search for a model..." title="Search and select AI model" />
-          <div id="model-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid var(--line); border-top: none; border-radius: 0 0 8px 8px; max-height: 200px; overflow-y: auto; z-index: 1000;"></div>
+        <div style="position: relative; display: flex; gap: 8px;">
+          <div style="flex: 1; position: relative;">
+            <input type="text" id="ai-model" placeholder="Search for a model..." title="Search and select AI model" />
+            <div id="model-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid var(--line); border-top: none; border-radius: 0 0 8px 8px; max-height: 200px; overflow-y: auto; z-index: 1000;"></div>
+          </div>
+          <button type="button" id="refresh-models-btn" style="padding: 8px 12px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 8px; cursor: pointer; white-space: nowrap;" title="Refresh available models from OpenRouter API">
+            ↻ Refresh
+          </button>
         </div>
       </div>
       <div class="row">
@@ -1463,6 +1468,7 @@
   const rememberKey  = document.getElementById("remember-key");
   const aiModel      = document.getElementById("ai-model");
   const modelDropdown = document.getElementById("model-dropdown");
+  const refreshModelsBtn = document.getElementById("refresh-models-btn");
 
   const fixedGenerateBtn = document.getElementById("fixed-generate-btn");
   const cancelGenerateBtn = document.getElementById("cancel-generate-btn");
@@ -1525,6 +1531,13 @@
   
   // Available models from OpenRouter
   let availableModels = [
+    // Default fallback models when API is unavailable
+    { id: 'anthropic/claude-3.5-sonnet', name: 'anthropic/claude-3.5-sonnet', pricing: 0.000015, displayText: 'anthropic/claude-3.5-sonnet - $0.000015/1K tokens' },
+    { id: 'anthropic/claude-3-haiku', name: 'anthropic/claude-3-haiku', pricing: 0.00000025, displayText: 'anthropic/claude-3-haiku - $0.000000/1K tokens' },
+    { id: 'openai/gpt-4o', name: 'openai/gpt-4o', pricing: 0.00001, displayText: 'openai/gpt-4o - $0.000010/1K tokens' },
+    { id: 'openai/gpt-4o-mini', name: 'openai/gpt-4o-mini', pricing: 0.00000015, displayText: 'openai/gpt-4o-mini - $0.000000/1K tokens' },
+    { id: 'meta-llama/llama-3.1-70b-instruct', name: 'meta-llama/llama-3.1-70b-instruct', pricing: 0.0000009, displayText: 'meta-llama/llama-3.1-70b-instruct - $0.000001/1K tokens' },
+    { id: 'meta-llama/llama-3.1-8b-instruct', name: 'meta-llama/llama-3.1-8b-instruct', pricing: 0.00000006, displayText: 'meta-llama/llama-3.1-8b-instruct - $0.000000/1K tokens' }
   ];
 
   // Model loading retry state
@@ -2182,6 +2195,11 @@
       if (openrouterKey.value.trim().length > 10) {
         refreshAvailableModelsWithRetry();
       }
+    });
+
+    // Manual refresh button for models
+    refreshModelsBtn.addEventListener('click', () => {
+      refreshAvailableModelsWithRetry();
     });
 
     window.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave({ silent:true }); });
