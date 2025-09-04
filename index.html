@@ -448,6 +448,33 @@
       display: block;
     }
 
+    #undo-generate-btn {
+      position: fixed;
+      bottom: 80px; /* Positioned above footer, next to cancel button */
+      right: 340px; /* Further left from cancel button */
+      padding: 8px 16px;
+      background: #6c757d;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font: 12px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(108, 117, 125, 0.3);
+      transition: all 200ms ease;
+      z-index: 100;
+      display: none;
+    }
+    
+    #undo-generate-btn:hover {
+      background: #5a6268;
+      transform: translateY(-1px);
+    }
+    
+    #undo-generate-btn.visible {
+      display: block;
+    }
+
     @media (max-width: 768px) {
       #cancel-generate-btn {
         left: 180px;
@@ -455,14 +482,28 @@
         bottom: 80px;
       }
       
+      #undo-generate-btn {
+        left: 20px; /* Position to the left on mobile */
+        right: auto;
+        bottom: 140px; /* Above the cancel button */
+      }
+      
       body[data-pagination-active="true"] #cancel-generate-btn {
         bottom: 140px;
+      }
+      
+      body[data-pagination-active="true"] #undo-generate-btn {
+        bottom: 200px; /* Adjust when pagination is active */
       }
     }
 
     @media (min-width: 769px) {
       body[data-pagination-active="true"] #cancel-generate-btn {
         bottom: 120px;
+      }
+      
+      body[data-pagination-active="true"] #undo-generate-btn {
+        bottom: 120px; /* Keep same level as cancel button */
       }
     }
 
@@ -1020,6 +1061,7 @@
 <!-- Fixed Generate Button -->
 <button id="fixed-generate-btn" title="Generate AI content (Ctrl/⌘+G)">Generate with AI</button>
 <button id="cancel-generate-btn" title="Cancel generation">Cancel</button>
+<button id="undo-generate-btn" title="Undo last AI generation">Undo Generation</button>
 <aside id="meta-panel" role="complementary" aria-label="Story metadata" data-open="0">
   <div id="meta-head">
     <div id="meta-title">Settings</div>
@@ -1416,6 +1458,7 @@
 
   const fixedGenerateBtn = document.getElementById("fixed-generate-btn");
   const cancelGenerateBtn = document.getElementById("cancel-generate-btn");
+  const undoGenerateBtn = document.getElementById("undo-generate-btn");
   const maxOutputTokensInput = document.getElementById("max-output-tokens");
   const maxInputCharactersInput = document.getElementById("max-input-characters");
   const temperatureInput = document.getElementById("temperature");
@@ -1451,6 +1494,11 @@
   let isGenerating = false;
   let generationController = null; // AbortController for canceling requests
   let isCtrlHeld = false; // Track if CTRL key is being held
+  
+  // Undo generation state
+  let lastContentBeforeGeneration = null; // Content before last generation
+  let hasUndoableGeneration = false; // Whether there's a generation that can be undone
+  let contentChangedSinceGeneration = false; // Whether user has edited since generation
   
 
   
@@ -1793,6 +1841,11 @@
       markDirty(); 
       updatePreview();
       
+      // Track changes after AI generation for undo confirmation
+      if (hasUndoableGeneration) {
+        contentChangedSinceGeneration = true;
+      }
+      
       // Mark that we're actively editing to prevent repagination
       if (paginationEnabled) {
         isEditingPage = true;
@@ -2069,6 +2122,9 @@
       }
     });
     cancelGenerateBtn.addEventListener('click', () => cancelGeneration());
+
+    // Undo generate button
+    undoGenerateBtn.addEventListener('click', () => undoGeneration());
 
     // Range input updates
     temperatureInput.addEventListener('input', () => {
@@ -2561,6 +2617,60 @@
     setStatus("Generation cancelled.");
   }
 
+  function undoGeneration() {
+    if (!hasUndoableGeneration || !lastContentBeforeGeneration) {
+      setStatus("No AI generation to undo.");
+      return;
+    }
+
+    // Check if user has made changes since last generation
+    if (contentChangedSinceGeneration) {
+      const shouldUndo = confirm(
+        "You have made changes since the last AI generation. " +
+        "Undoing will lose these changes. Continue?"
+      );
+      if (!shouldUndo) {
+        setStatus("Undo cancelled.");
+        return;
+      }
+    }
+
+    // Restore the content from before generation
+    const currentSelection = getSelection(editor);
+    editor.value = lastContentBeforeGeneration;
+    
+    // Try to restore cursor position, or place at end if position is invalid
+    try {
+      setSelection(editor, currentSelection.start, currentSelection.end);
+    } catch (e) {
+      // If selection position is invalid, place cursor at end
+      const endPos = editor.value.length;
+      setSelection(editor, endPos, endPos);
+    }
+
+    // Update state
+    hasUndoableGeneration = false;
+    contentChangedSinceGeneration = false;
+    lastContentBeforeGeneration = null;
+
+    // Update UI
+    undoGenerateBtn.classList.remove('visible');
+    updatePreview();
+    markDirty();
+
+    // Handle pagination if active
+    if (paginationEnabled) {
+      isEditingPage = false;
+      if (pages[currentPageIndex]) {
+        pages[currentPageIndex].content = editor.value;
+      }
+      fullContent = rebuildFullContent();
+      initializePagination();
+    }
+
+    setStatus("AI generation undone.");
+  }
+
   function findMatchingStoryDexEntries(text) {
     if (!text || !currentStoryDex || currentStoryDex.length === 0) {
       return [];
@@ -2748,6 +2858,11 @@
     }
 
     try {
+      // Save content before generation for undo functionality
+      lastContentBeforeGeneration = editor.value;
+      hasUndoableGeneration = false; // Will be set to true on successful generation
+      contentChangedSinceGeneration = false;
+      
       generationController = new AbortController();
       setGenerationState(true);
       setStatus("Generating AI content...");
@@ -2857,8 +2972,18 @@
       // Jump to last page and scroll to bottom after successful generation
       jumpToLastPageAndScrollToBottom();
       
+      // Enable undo functionality after successful generation
+      hasUndoableGeneration = true;
+      contentChangedSinceGeneration = false;
+      undoGenerateBtn.classList.add('visible');
+      
       setStatus("AI content generated successfully.");
     } catch (error) {
+      // Reset undo state if generation fails
+      lastContentBeforeGeneration = null;
+      hasUndoableGeneration = false;
+      contentChangedSinceGeneration = false;
+      
       if (error.name === 'AbortError') {
         setStatus("Generation cancelled.");
       } else {
@@ -3815,6 +3940,12 @@
       // Clear all content
       editor.value = "";
       
+      // Reset undo generation state
+      lastContentBeforeGeneration = null;
+      hasUndoableGeneration = false;
+      contentChangedSinceGeneration = false;
+      undoGenerateBtn.classList.remove('visible');
+      
       // Clear Story Dex
       currentStoryDex = [];
       renderStoryDex();
@@ -3859,6 +3990,12 @@
       const parsed = parseFileText(raw);
       writeMetaToUI(parsed.meta);
       editor.value = parsed.content;
+      
+      // Reset undo generation state when loading a file
+      lastContentBeforeGeneration = null;
+      hasUndoableGeneration = false;
+      contentChangedSinceGeneration = false;
+      undoGenerateBtn.classList.remove('visible');
       
       // Initialize pagination with loaded content
       fullContent = parsed.content;
