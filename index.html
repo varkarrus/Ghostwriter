@@ -1510,8 +1510,11 @@
     modalSaveAsBtn.disabled = !signedIn;
     modalNewBtn.disabled = !signedIn;
     editor.disabled = !signedIn; // Block typing while logged out
-    [boldBtn, italicBtn, underlineBtn, hiddenBtn, bulletBtn, headerBtn, headingSel, togglePreviewBtn, toggleSplitBtn, aiPreInput, nextInstInput, nextEnabled, metaClose, metaSaveNow, fixedGenerateBtn].forEach(el => el.disabled = !signedIn);
-    metaTab.setAttribute('aria-disabled', String(!signedIn));
+    [boldBtn, italicBtn, underlineBtn, hiddenBtn, bulletBtn, headerBtn, headingSel, togglePreviewBtn, toggleSplitBtn, nextInstInput, nextEnabled, metaClose, metaSaveNow].forEach(el => el.disabled = !signedIn);
+    // Generate button and AI pre-prompt should work independently of Google authentication
+    // Their state is managed by updateGenerateButton() based on API key and model
+    // Keep Settings accessible so users can configure AI settings without Google login
+    metaTab.setAttribute('aria-disabled', String(false)); // Always allow access to settings
     if (!signedIn) openMeta(false);
   }
   
