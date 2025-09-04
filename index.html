@@ -1643,25 +1643,25 @@
   }
   
   function loadMobileSettings() {
-    if (hideMarkdownControls) {
-      const saved = localStorage.getItem('ghostwriter_hide_markdown_controls');
-      hideMarkdownControls.checked = saved === 'true';
-    }
-    if (hideFooterConsole) {
-      const saved = localStorage.getItem('ghostwriter_hide_footer_console');
-      hideFooterConsole.checked = saved === 'true';
-    }
+    // Mobile settings are now loaded as part of the global AI settings
+    // This function is kept for backwards compatibility and applies settings
     applyMobileSettings();
   }
   
   function saveMobileSettings() {
+    // Mobile settings are now saved as part of the global AI settings
+    // Remove old localStorage entries and save to global settings
     if (hideMarkdownControls) {
-      localStorage.setItem('ghostwriter_hide_markdown_controls', hideMarkdownControls.checked);
+      localStorage.removeItem('ghostwriter_hide_markdown_controls');
     }
     if (hideFooterConsole) {
-      localStorage.setItem('ghostwriter_hide_footer_console', hideFooterConsole.checked);
+      localStorage.removeItem('ghostwriter_hide_footer_console');
     }
     applyMobileSettings();
+    
+    // Save to global settings (with delay to avoid too many saves)
+    clearTimeout(saveAISettingsTimer);
+    saveAISettingsTimer = setTimeout(() => saveAISettings(), 1000);
   }
   
   function getQueryFileId() { const p = new URLSearchParams(location.search); return p.get("file"); }
@@ -3416,8 +3416,37 @@
     try {
       aiSettingsFileId = await findAISettingsFile(isUserAction);
       if (!aiSettingsFileId) {
+        // No settings file exists yet - check for localStorage migration
+        let needsMigration = false;
+        
+        if (hideMarkdownControls) {
+          const saved = localStorage.getItem('ghostwriter_hide_markdown_controls');
+          if (saved !== null) {
+            hideMarkdownControls.checked = saved === 'true';
+            localStorage.removeItem('ghostwriter_hide_markdown_controls');
+            needsMigration = true;
+          }
+        }
+        
+        if (hideFooterConsole) {
+          const saved = localStorage.getItem('ghostwriter_hide_footer_console');
+          if (saved !== null) {
+            hideFooterConsole.checked = saved === 'true';
+            localStorage.removeItem('ghostwriter_hide_footer_console');
+            needsMigration = true;
+          }
+        }
+        
+        // Apply migrated settings
+        applyMobileSettings();
+        
+        // Save migrated settings to create new settings file
+        if (needsMigration) {
+          setTimeout(() => saveAISettings(false), 1000); // Save without user action flag
+        }
+        
         aiSettingsLoaded = true;
-        return; // No settings file exists yet
+        return;
       }
 
       const res = await fetch(`${DRIVE_FILES_URL}/${aiSettingsFileId}?alt=media`, { headers: authHeader() });
@@ -3499,6 +3528,34 @@
       
       // Update page size row visibility after loading pagination settings
       updatePageSizeRowVisibility();
+      
+      // Load mobile UI settings (with migration from localStorage)
+      if (settings.hide_markdown_controls !== undefined && hideMarkdownControls) {
+        hideMarkdownControls.checked = settings.hide_markdown_controls;
+      } else if (hideMarkdownControls) {
+        // Migrate from localStorage if not in global settings
+        const saved = localStorage.getItem('ghostwriter_hide_markdown_controls');
+        if (saved !== null) {
+          hideMarkdownControls.checked = saved === 'true';
+          // Remove from localStorage after migration
+          localStorage.removeItem('ghostwriter_hide_markdown_controls');
+        }
+      }
+      
+      if (settings.hide_footer_console !== undefined && hideFooterConsole) {
+        hideFooterConsole.checked = settings.hide_footer_console;
+      } else if (hideFooterConsole) {
+        // Migrate from localStorage if not in global settings
+        const saved = localStorage.getItem('ghostwriter_hide_footer_console');
+        if (saved !== null) {
+          hideFooterConsole.checked = saved === 'true';
+          // Remove from localStorage after migration
+          localStorage.removeItem('ghostwriter_hide_footer_console');
+        }
+      }
+      
+      // Apply mobile settings
+      applyMobileSettings();
       
       // Apply current font size based on screen size
       applyFontSize();
@@ -3762,6 +3819,9 @@
         pagination_enabled: !!paginationEnabledCheckbox.checked,
         page_size_desktop: parseInt(pageSizeDesktop.value) || 20000,
         page_size_mobile: parseInt(pageSizeMobile.value) || 10000,
+        // Mobile UI preferences
+        hide_markdown_controls: hideMarkdownControls ? !!hideMarkdownControls.checked : false,
+        hide_footer_console: hideFooterConsole ? !!hideFooterConsole.checked : false,
         last_updated: new Date().toISOString()
       };
       
