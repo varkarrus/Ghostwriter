@@ -1092,6 +1092,10 @@
         <textarea id="ai-pre" placeholder="System-style guidance for the model…"></textarea>
       </div>
       <div class="row">
+        <label for="story-summary">Story Summary</label>
+        <textarea id="story-summary" placeholder="Brief summary of the story for context…"></textarea>
+      </div>
+      <div class="row">
         <label for="next-inst">Next Instructions</label>
         <textarea id="next-inst" placeholder="Steering for the next generation…"></textarea>
         <div id="next-enable-wrap">
@@ -1411,6 +1415,7 @@
   const metaSaveNow  = document.getElementById("meta-save-now");
 
   const aiPreInput   = document.getElementById("ai-pre");
+  const storySummaryInput = document.getElementById("story-summary");
   const nextInstInput= document.getElementById("next-inst");
   const nextEnabled  = document.getElementById("next-enabled");
   
@@ -1895,6 +1900,7 @@
 
     // Metadata edits => autosave
     aiPreInput.addEventListener("input", () => { markDirty(); });
+    storySummaryInput.addEventListener("input", () => { markDirty(); });
     nextInstInput.addEventListener("input", () => { markDirty(); });
     nextEnabled.addEventListener("change", () => { markDirty(); });
     openrouterKey.addEventListener("input", () => { 
@@ -2309,6 +2315,7 @@
   function readMetaFromUI(){
     return {
       ai_pre_prompt: aiPreInput.value || "",
+      story_summary: storySummaryInput.value || "",
       next_instructions: nextInstInput.value || "",
       next_instructions_enabled: !!nextEnabled.checked,
       openrouter_key: rememberKey.checked ? (openrouterKey.value || "") : "",
@@ -2332,6 +2339,7 @@
   
   function writeMetaToUI(meta){
     aiPreInput.value = meta.ai_pre_prompt || "";
+    storySummaryInput.value = meta.story_summary || "";
     nextInstInput.value = meta.next_instructions || "";
     nextEnabled.checked = !!meta.next_instructions_enabled;
     openrouterKey.value = meta.openrouter_key || "";
@@ -2764,7 +2772,18 @@
       let limitedContent = currentContent;
       const maxInputLength = parseInt(maxInputCharactersInput.value) || 32000; // Use user-configured limit
       
-      if (currentContent.length > maxInputLength) {
+      // Calculate the length of pre-prompt and story summary that will be preserved
+      let preservedLength = 0;
+      if (aiPreInput.value.trim()) {
+        preservedLength += `[${aiPreInput.value.trim()}]\n\n`.length;
+      }
+      if (storySummaryInput.value.trim()) {
+        preservedLength += `[${storySummaryInput.value.trim()}]\n\n`.length;
+      }
+      
+      const availableContentLength = maxInputLength - preservedLength;
+      
+      if (currentContent.length > availableContentLength && availableContentLength > 0) {
         const paragraphs = currentContent.split(/\n\s*\n/).filter(p => p.trim());
         let totalLength = 0;
         const recentParagraphs = [];
@@ -2772,7 +2791,7 @@
         // Work backwards from the end to include the most recent paragraphs
         for (let i = paragraphs.length - 1; i >= 0; i--) {
           const paragraph = paragraphs[i];
-          if (totalLength + paragraph.length > maxInputLength && recentParagraphs.length > 0) {
+          if (totalLength + paragraph.length > availableContentLength && recentParagraphs.length > 0) {
             break;
           }
           recentParagraphs.unshift(paragraph);
@@ -2789,6 +2808,9 @@
       let prompt = "";
       if (aiPreInput.value.trim()) {
         prompt += `[${aiPreInput.value.trim()}]\n\n`;
+      }
+      if (storySummaryInput.value.trim()) {
+        prompt += `[${storySummaryInput.value.trim()}]\n\n`;
       }
       prompt += limitedContent;
       
@@ -2823,14 +2845,15 @@
           .map(entry => `[${entry.name}: ${entry.description}]`)
           .join('\n');
         
-        // Insert Story Dex entries after preprompt but before main content
+        // Insert Story Dex entries after preprompt and story summary but before main content
+        prompt = "";
         if (aiPreInput.value.trim()) {
-          // If there's a preprompt, add Story Dex entries after it
-          prompt = `[${aiPreInput.value.trim()}]\n\n${dexEntriesText}\n\n${limitedContent}`;
-        } else {
-          // If no preprompt, add Story Dex entries at the beginning
-          prompt = `${dexEntriesText}\n\n${limitedContent}`;
+          prompt += `[${aiPreInput.value.trim()}]\n\n`;
         }
+        if (storySummaryInput.value.trim()) {
+          prompt += `[${storySummaryInput.value.trim()}]\n\n`;
+        }
+        prompt += `${dexEntriesText}\n\n${limitedContent}`;
         
         // Re-add next instructions if they were in the original prompt
         if (nextEnabled.checked && nextInstInput.value.trim()) {
@@ -2856,6 +2879,9 @@
           
           if (aiPreInput.value.trim()) {
             preservedStart += `[${aiPreInput.value.trim()}]\n\n`;
+          }
+          if (storySummaryInput.value.trim()) {
+            preservedStart += `[${storySummaryInput.value.trim()}]\n\n`;
           }
           preservedStart += dexEntriesText + '\n\n';
           
