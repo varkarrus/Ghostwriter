@@ -488,18 +488,13 @@
         bottom: 80px;
       }
       
+      /* Hide fixed undo button on mobile - header button takes precedence */
       #undo-generate-btn {
-        left: 20px; /* Position to the left on mobile */
-        right: auto;
-        bottom: 140px; /* Above the cancel button */
+        display: none !important;
       }
       
       body[data-pagination-active="true"] #cancel-generate-btn {
         bottom: 140px;
-      }
-      
-      body[data-pagination-active="true"] #undo-generate-btn {
-        bottom: 200px; /* Adjust when pagination is active */
       }
     }
 
@@ -1084,6 +1079,7 @@
       <div class="row">
         <button id="auth-btn">Sign in</button>
         <button id="file-btn" disabled>File</button>
+        <button id="mobile-undo-btn" class="mobile-only" title="Undo last AI generation" style="display: none;">Undo</button>
         <button id="mobile-settings-btn" class="mobile-only">Settings</button>
       </div>
       <div class="row" id="formatting-row" title="Formatting inserts Markdown/HTML into the plaintext">
@@ -1646,6 +1642,7 @@
   const fixedGenerateBtn = document.getElementById("fixed-generate-btn");
   const cancelGenerateBtn = document.getElementById("cancel-generate-btn");
   const undoGenerateBtn = document.getElementById("undo-generate-btn");
+  const mobileUndoBtn = document.getElementById("mobile-undo-btn");
   const maxOutputTokensInput = document.getElementById("max-output-tokens");
   const maxInputCharactersInput = document.getElementById("max-input-characters");
   const temperatureInput = document.getElementById("temperature");
@@ -1723,6 +1720,18 @@
     saveDot.classList.remove("saving","saved","idle");
     saveDot.classList.add(state);
   }
+  
+  function setUndoButtonVisibility(visible) {
+    // Control both desktop and mobile undo buttons
+    if (visible) {
+      undoGenerateBtn.classList.add('visible');
+      mobileUndoBtn.style.display = 'inline-block';
+    } else {
+      undoGenerateBtn.classList.remove('visible');
+      mobileUndoBtn.style.display = 'none';
+    }
+  }
+  
   function setActiveFile(id, name) {
     currentFileId = id || null;
     currentFileName = name || null;
@@ -1745,7 +1754,7 @@
     modalSaveAsBtn.disabled = !signedIn;
     modalNewBtn.disabled = !signedIn;
     editor.disabled = !signedIn; // Block typing while logged out
-    [boldBtn, italicBtn, underlineBtn, hiddenBtn, bulletBtn, headerBtn, headingSel, togglePreviewBtn, toggleSplitBtn, nextInstInput, nextEnabled, metaClose, metaSaveNow].forEach(el => el.disabled = !signedIn);
+    [boldBtn, italicBtn, underlineBtn, hiddenBtn, bulletBtn, headerBtn, headingSel, togglePreviewBtn, toggleSplitBtn, nextInstInput, nextEnabled, metaClose, metaSaveNow, mobileUndoBtn].forEach(el => el.disabled = !signedIn);
     // Generate button and AI pre-prompt should work independently of Google authentication
     // Their state is managed by updateGenerateButton() based on API key and model
     // Keep Settings accessible so users can configure AI settings without Google login
@@ -2316,6 +2325,8 @@
 
     // Undo generate button
     undoGenerateBtn.addEventListener('click', () => undoGeneration());
+    // Mobile undo generate button
+    mobileUndoBtn.addEventListener('click', () => undoGeneration());
 
     // Range input updates
     temperatureInput.addEventListener('input', () => {
@@ -2884,7 +2895,7 @@
     lastContentBeforeGeneration = null;
 
     // Update UI
-    undoGenerateBtn.classList.remove('visible');
+    setUndoButtonVisibility(false);
     updatePreview();
     markDirty();
 
@@ -3223,7 +3234,7 @@
       // Enable undo functionality after successful generation
       hasUndoableGeneration = true;
       contentChangedSinceGeneration = false;
-      undoGenerateBtn.classList.add('visible');
+      setUndoButtonVisibility(true);
       
       setStatus("AI content generated successfully.");
     } catch (error) {
@@ -4473,7 +4484,7 @@
       lastContentBeforeGeneration = null;
       hasUndoableGeneration = false;
       contentChangedSinceGeneration = false;
-      undoGenerateBtn.classList.remove('visible');
+      setUndoButtonVisibility(false);
       
       // Clear Story Dex
       currentStoryDex = [];
@@ -4524,7 +4535,7 @@
       lastContentBeforeGeneration = null;
       hasUndoableGeneration = false;
       contentChangedSinceGeneration = false;
-      undoGenerateBtn.classList.remove('visible');
+      setUndoButtonVisibility(false);
       
       // Initialize pagination with loaded content
       fullContent = parsed.content;
